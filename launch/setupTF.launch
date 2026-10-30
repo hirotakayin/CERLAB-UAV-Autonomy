@@ -3,4 +3,7 @@
 	<node name="quadcopterTF" pkg="uav_simulator" type="quadcopterTFBroadcaster" args="$(arg pose_topic)" output="screen"/>
 	<node pkg="tf" type="static_transform_publisher" name="baselink_cameralink"
       args="0.09 0.0 0.095 -1.57 0 -1.57 base_link camera_link 1000" />
+	<!-- Mid-360 in quadcopter_lidar.urdf: 0.13 m up, pitched 23.5 deg nose-down (args: x y z yaw pitch roll) -->
+	<node pkg="tf" type="static_transform_publisher" name="baselink_lidarlink"
+      args="0 0 0.13 0 0.4102 0 base_link lidar_link 1000" />
 </launch>

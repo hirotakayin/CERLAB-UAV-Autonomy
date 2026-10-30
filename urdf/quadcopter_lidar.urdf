@@ -109,7 +109,7 @@
 
   <gazebo reference="base_link">
     <sensor type="ray" name="laser_livox">
-        <pose>0 0 0.13 0 0 0</pose>
+        <pose>0 0 0.13 0 0.4102 0</pose> <!-- Mid-360 pitched 23.5 deg nose-down, matches the real drone -->
         <visualize>true</visualize>
         <always_on>True</always_on>
         <update_rate>10</update_rate>
@@ -148,7 +148,7 @@
           <publish_pointcloud_type>2</publish_pointcloud_type>
 		      <!-- <ros_topic>/livox/lidar</ros_topic> -->
           <ros_topic>/cloud_registered_body</ros_topic>
-          <frameName>base_link</frameName>
+          <frameName>lidar_link</frameName> <!-- points are in the tilted sensor frame; base_link -> lidar_link is published in setupTF.launch -->
         </plugin>
       </sensor>  
   </gazebo>

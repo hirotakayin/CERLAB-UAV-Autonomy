@@ -1,0 +1,129 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="excavation_simple">
+    <static>true</static>
+
+    <link name="excavation_link">
+      <inertial>
+        <mass>1.0</mass>
+        <inertia><ixx>1e-6</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-6</iyy><iyz>0</iyz><izz>1e-6</izz></inertia>
+      </inertial>
+
+      <!-- PIT FLOOR (Z = -8 M) -->
+      <collision name="ground_collision">
+        <pose>3.0 11.0 -8.05 0 0 0</pose>
+        <geometry><box><size>6.0 12.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="ground_visual">
+        <pose>3.0 11.0 -8.05 0 0 0</pose>
+        <geometry><box><size>6.0 12.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- TOP APRONS (Z = 0 M) -->
+      <collision name="top_ground_left_collision">
+        <pose>-5.0 11.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 32.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_left_visual">
+        <pose>-5.0 11.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 32.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="top_ground_right_collision">
+        <pose>11.0 11.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 32.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_right_visual">
+        <pose>11.0 11.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 32.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- NEAR APRON Y [-5, 5] HOLDS THE TAKEOFF SPOT (3, 2) -->
+      <collision name="top_ground_near_collision">
+        <pose>3.0 0.0 -0.05 0 0 0</pose>
+        <geometry><box><size>6.0 10.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_near_visual">
+        <pose>3.0 0.0 -0.05 0 0 0</pose>
+        <geometry><box><size>6.0 10.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="top_ground_far_collision">
+        <pose>3.0 22.0 -0.05 0 0 0</pose>
+        <geometry><box><size>6.0 10.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_far_visual">
+        <pose>3.0 22.0 -0.05 0 0 0</pose>
+        <geometry><box><size>6.0 10.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- PIT WALLS, 0.5 M THICK, INNER FACES ON THE PIT BOUNDARY -->
+      <collision name="wall_left_collision">
+        <pose>-0.25 11.0 -4.0 0 0 0</pose>
+        <geometry><box><size>0.5 12.0 8.0</size></box></geometry>
+      </collision>
+      <visual name="wall_left_visual">
+        <pose>-0.25 11.0 -4.0 0 0 0</pose>
+        <geometry><box><size>0.5 12.0 8.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.5</ambient>
+          <diffuse>0.5 0.5 0.5 0.5</diffuse>
+        </material>
+      </visual>
+      <collision name="wall_right_collision">
+        <pose>6.25 11.0 -4.0 0 0 0</pose>
+        <geometry><box><size>0.5 12.0 8.0</size></box></geometry>
+      </collision>
+      <visual name="wall_right_visual">
+        <pose>6.25 11.0 -4.0 0 0 0</pose>
+        <geometry><box><size>0.5 12.0 8.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.5</ambient>
+          <diffuse>0.5 0.5 0.5 0.5</diffuse>
+        </material>
+      </visual>
+      <collision name="wall_far_collision">
+        <pose>3.0 17.25 -4.0 0 0 0</pose>
+        <geometry><box><size>7.0 0.5 8.0</size></box></geometry>
+      </collision>
+      <visual name="wall_far_visual">
+        <pose>3.0 17.25 -4.0 0 0 0</pose>
+        <geometry><box><size>7.0 0.5 8.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.5</ambient>
+          <diffuse>0.5 0.5 0.5 0.5</diffuse>
+        </material>
+      </visual>
+      <collision name="wall_near_collision">
+        <pose>3.0 4.75 -4.0 0 0 0</pose>
+        <geometry><box><size>7.0 0.5 8.0</size></box></geometry>
+      </collision>
+      <visual name="wall_near_visual">
+        <pose>3.0 4.75 -4.0 0 0 0</pose>
+        <geometry><box><size>7.0 0.5 8.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.5</ambient>
+          <diffuse>0.5 0.5 0.5 0.5</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

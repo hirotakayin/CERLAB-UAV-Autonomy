@@ -230,7 +230,8 @@ target_link_libraries(obstaclePathPlugin
    ${GAZEBO_LIBRARIES}
 )
 
-target_link_libraries(livox_laser ${catkin_LIBRARIES} RayPlugin libprotobuf.so.9)
+target_link_libraries(livox_laser ${catkin_LIBRARIES} ${GAZEBO_LIBRARIES} RayPlugin ${PROTOBUF_LIBRARIES})
+add_dependencies(livox_laser ${PROJECT_NAME}_generate_messages_cpp)
 
 
 
