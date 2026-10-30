@@ -190,6 +190,48 @@ namespace globalPlanner{
 			cout << this->hint_ << ": Max Depth: " << this->dmax_ << endl;
 		}
 
+		// sensor model: camera (horizontal/vertical FOV cone) or lidar (360 deg, tilted elevation band)
+		std::string sensorType;
+		if (not this->nh_.getParam(this->ns_ + "/sensor_type", sensorType)){
+			sensorType = "camera";
+			cout << this->hint_ << ": No sensor type param. Use default: camera" << endl;
+		}
+		else{
+			cout << this->hint_ << ": Sensor type: " << sensorType << endl;
+		}
+		this->useLidarModel_ = (sensorType == "lidar");
+
+		if (this->useLidarModel_){
+			double fovUpDeg, fovDownDeg, pitchDeg;
+			if (not this->nh_.getParam(this->ns_ + "/lidar_fov_up", fovUpDeg)){
+				fovUpDeg = 52.0;
+				cout << this->hint_ << ": No lidar fov up param. Use default: 52.0 deg (Mid-360)" << endl;
+			}
+			if (not this->nh_.getParam(this->ns_ + "/lidar_fov_down", fovDownDeg)){
+				fovDownDeg = -7.0;
+				cout << this->hint_ << ": No lidar fov down param. Use default: -7.0 deg (Mid-360)" << endl;
+			}
+			if (not this->nh_.getParam(this->ns_ + "/lidar_pitch", pitchDeg)){
+				pitchDeg = 0.0;
+				cout << this->hint_ << ": No lidar pitch param. Use default: 0.0 deg" << endl;
+			}
+			this->lidarFovUp_ = fovUpDeg * PI_const / 180.0;
+			this->lidarFovDown_ = fovDownDeg * PI_const / 180.0;
+			this->lidarPitch_ = pitchDeg * PI_const / 180.0;
+			cout << this->hint_ << ": Lidar elevation FOV: [" << fovDownDeg << ", " << fovUpDeg << "] deg, pitch (nose-down positive): " << pitchDeg << " deg" << endl;
+		}
+
+		// steepest roadmap edge allowed (edges must still be known free)
+		double maxEdgeVerticalAngleDeg;
+		if (not this->nh_.getParam(this->ns_ + "/max_edge_vertical_angle", maxEdgeVerticalAngleDeg)){
+			this->maxEdgeVerticalAngle_ = this->verticalFOV_/2;
+			cout << this->hint_ << ": No max edge vertical angle param. Use half the vertical FOV: " << this->maxEdgeVerticalAngle_ * 180.0 / PI_const << " deg" << endl;
+		}
+		else{
+			this->maxEdgeVerticalAngle_ = maxEdgeVerticalAngleDeg * PI_const / 180.0;
+			cout << this->hint_ << ": Max edge vertical angle: " << maxEdgeVerticalAngleDeg << " deg" << endl;
+		}
+
 		// nearest neighbor number
 		if (not this->nh_.getParam(this->ns_ + "/nearest_neighbor_number", this->nnNum_)){
 			this->nnNum_ = 15;
@@ -227,9 +269,17 @@ namespace globalPlanner{
 		}
 		else{
 			for (int i=0; i<yawNum; ++i){
-				this->yaws_.push_back(i*2*PI_const/32);
-			}	
+				this->yaws_.push_back(i*2*PI_const/yawNum);
+			}
 			cout << this->hint_ << ": Number of yaw angles is set to: " << yawNum << endl;
+		}
+
+		// lidar orientation for each candidate yaw: world_R_lidar = Rz(yaw) * Ry(pitch)
+		if (this->useLidarModel_){
+			for (double yaw : this->yaws_){
+				Eigen::Matrix3d worldRLidar = (Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(this->lidarPitch_, Eigen::Vector3d::UnitY())).toRotationMatrix();
+				this->yawLidarRotInv_.push_back(worldRLidar.transpose());
+			}
 		}
 
 		// minimum threshold of voxels
@@ -382,7 +432,7 @@ namespace globalPlanner{
 		projection(1) = direction.y();
 		projection(2) = 0;
 		double verticalAngle = angleBetweenVectors(direction, projection);
-		if (verticalAngle < this->verticalFOV_/2){
+		if (verticalAngle < this->maxEdgeVerticalAngle_){
 			return true;
 		}
 		else{
@@ -406,6 +456,14 @@ namespace globalPlanner{
 			return false;
 		}
 		return true;
+	}
+
+	// lidar check: rotate the direction into the lidar frame at this yaw and test its elevation
+	// against the lidar's vertical FOV (full 360 deg in azimuth)
+	bool DEP::lidarVisible(const Eigen::Vector3d& direction, int yawIdx){
+		Eigen::Vector3d dirLidar = this->yawLidarRotInv_[yawIdx] * direction;
+		double elevation = atan2(dirLidar.z(), dirLidar.head<2>().norm());
+		return elevation >= this->lidarFovDown_ and elevation <= this->lidarFovUp_;
 	}
 
 
@@ -651,6 +709,20 @@ namespace globalPlanner{
 			}
 			n->newNode = true;
 		}
+
+		// edges are only made through known-free space, so retry old nodes as the map fills in;
+		// otherwise nodes created before their surroundings were observed stay disconnected forever
+		for (const std::shared_ptr<PRM::Node>& n : this->prmNodeVec_){
+			std::vector<std::shared_ptr<PRM::Node>> knn = this->roadmap_->kNearestNeighbor(n, this->nnNum_);
+			for (std::shared_ptr<PRM::Node>& nearestNeighborNode : knn){
+				if (nearestNeighborNode == n or n->adjNodes.count(nearestNeighborNode) != 0) continue;
+				double distance2knn = (n->pos - nearestNeighborNode->pos).norm();
+				if (distance2knn < this->maxConnectDist_ and sensorRangeCondition(n, nearestNeighborNode) and this->map_->isInflatedFreeLine(n->pos, nearestNeighborNode->pos)){
+					n->adjNodes.insert(nearestNeighborNode);
+					nearestNeighborNode->adjNodes.insert(n);
+				}
+			}
+		}
 	}	 
 
 	void DEP::pruneNodes(){
@@ -791,7 +863,7 @@ namespace globalPlanner{
 		// find nearest node of current location
 		std::shared_ptr<PRM::Node> currPos;
 		currPos.reset(new PRM::Node (this->position_));
-		std::shared_ptr<PRM::Node> start = this->roadmap_->nearestNeighbor(currPos);
+		std::shared_ptr<PRM::Node> start = this->getConnectedNode(this->position_);
 
 		candidatePaths.clear();
 		for (std::shared_ptr<PRM::Node> goal : goalCandidates){
@@ -808,6 +880,76 @@ namespace globalPlanner{
 			candidatePaths.push_back(pathSc);
 		}
 		return findPath;
+	}
+
+	std::shared_ptr<PRM::Node> DEP::getConnectedNode(const Eigen::Vector3d& pos){
+		// the nearest node can sit in unobserved space with no edges (e.g. the lidar's blind cone under the robot),
+		// so prefer the closest nearby node that is connected and reachable in a straight known-free line
+		std::shared_ptr<PRM::Node> query;
+		query.reset(new PRM::Node (pos));
+		std::shared_ptr<PRM::Node> nearest = this->roadmap_->nearestNeighbor(query);
+		std::vector<std::shared_ptr<PRM::Node>> candidates = this->roadmap_->kNearestNeighbor(query, 15);
+		std::sort(candidates.begin(), candidates.end(), [&pos](const std::shared_ptr<PRM::Node>& a, const std::shared_ptr<PRM::Node>& b){
+			return (a->pos - pos).norm() < (b->pos - pos).norm();
+		});
+		for (std::shared_ptr<PRM::Node>& n : candidates){
+			if (n->adjNodes.size() != 0 and this->map_->isInflatedFreeLine(pos, n->pos)){
+				return n;
+			}
+		}
+		return nearest;
+	}
+
+	bool DEP::findPathToPoint(const Eigen::Vector3d& goal, nav_msgs::Path& path){
+		// roadmap path from the current position to an arbitrary point (return home, inspection viewpoint)
+		path.poses.clear();
+		if (not this->odomReceived_ or this->roadmap_->getSize() == 0) return false;
+
+		std::vector<std::shared_ptr<PRM::Node>> nodePath;
+		std::shared_ptr<PRM::Node> currNode;
+		currNode.reset(new PRM::Node (this->position_));
+		std::shared_ptr<PRM::Node> goalNode;
+		goalNode.reset(new PRM::Node (goal));
+
+		if (this->map_->isInflatedFreeLine(this->position_, goal)){
+			nodePath = {currNode, goalNode}; // straight shot
+		}
+		else{
+			std::shared_ptr<PRM::Node> start = this->getConnectedNode(this->position_);
+			std::shared_ptr<PRM::Node> end = this->getConnectedNode(goal);
+			if (not this->map_->isInflatedFreeLine(goal, end->pos)) return false; // goal not reachable from the roadmap
+			std::vector<std::shared_ptr<PRM::Node>> roadmapPath = PRM::AStar(this->roadmap_, start, end, this->map_);
+			if (roadmapPath.size() == 0) return false;
+			nodePath.push_back(currNode);
+			nodePath.insert(nodePath.end(), roadmapPath.begin(), roadmapPath.end());
+			nodePath.push_back(goalNode);
+		}
+
+		std::vector<std::shared_ptr<PRM::Node>> nodePathSc;
+		this->shortcutPath(nodePath, nodePathSc);
+		for (size_t i=0; i<nodePathSc.size(); ++i){
+			geometry_msgs::PoseStamped p;
+			p.header.frame_id = "map";
+			p.pose.position.x = nodePathSc[i]->pos(0);
+			p.pose.position.y = nodePathSc[i]->pos(1);
+			p.pose.position.z = nodePathSc[i]->pos(2);
+			double yaw = 0.0;
+			if (i+1 < nodePathSc.size()){
+				Eigen::Vector3d diff = nodePathSc[i+1]->pos - nodePathSc[i]->pos;
+				yaw = atan2(diff(1), diff(0));
+			}
+			else if (i > 0){
+				Eigen::Vector3d diff = nodePathSc[i]->pos - nodePathSc[i-1]->pos;
+				yaw = atan2(diff(1), diff(0));
+			}
+			p.pose.orientation = globalPlanner::quaternion_from_rpy(0, 0, yaw);
+			path.poses.push_back(p);
+		}
+		return path.poses.size() >= 2;
+	}
+
+	int DEP::getFrontierNum(){
+		return int(this->frontierPointPairs_.size());
 	}
 
 	void DEP::findBestPath(const std::vector<std::vector<std::shared_ptr<PRM::Node>>>& candidatePaths, std::vector<std::shared_ptr<PRM::Node>>& bestPath){
@@ -987,7 +1129,8 @@ namespace globalPlanner{
 		// Position:
 		Eigen::Vector3d p = n->pos;
 
-		double zRange = this->dmax_ * tan(this->verticalFOV_/2.0);
+		// a tilted 360 deg lidar sees well above and below the robot, so search the full range in z
+		double zRange = this->useLidarModel_ ? this->dmax_ : this->dmax_ * tan(this->verticalFOV_/2.0);
 		int countTotalUnknown = 0;
 		for (double z = p(2) - zRange; z <= p(2) + zRange; z += this->map_->getRes()){
 			for (double y = p(1) - this->dmax_; y <= p(1)+ this->dmax_; y += this->map_->getRes()){
@@ -1001,7 +1144,25 @@ namespace globalPlanner{
 					}
 
 					if (this->map_->isUnknown(nodePoint) and not this->map_->isInflatedOccupied(nodePoint)){
-						if (this->sensorFOVCondition(nodePoint, p)){
+						if (this->useLidarModel_){
+							Eigen::Vector3d direction = nodePoint - p;
+							// cheap elevation test first, the line-of-sight raycast in sensorFOVCondition last
+							bool visibleAtAnyYaw = false;
+							std::vector<bool> visibleAtYaw (this->yaws_.size(), false);
+							for (size_t i=0; i<this->yaws_.size(); ++i){
+								visibleAtYaw[i] = this->lidarVisible(direction, i);
+								visibleAtAnyYaw = visibleAtAnyYaw or visibleAtYaw[i];
+							}
+							if (visibleAtAnyYaw and this->sensorFOVCondition(nodePoint, p)){
+								++countTotalUnknown;
+								for (size_t i=0; i<this->yaws_.size(); ++i){
+									if (visibleAtYaw[i]){
+										yawNumVoxels[this->yaws_[i]] += 1;
+									}
+								}
+							}
+						}
+						else if (this->sensorFOVCondition(nodePoint, p)){
 							++countTotalUnknown;
 							for (double yaw: this->yaws_){
 								Eigen::Vector3d yawDirection (cos(yaw), sin(yaw), 0);

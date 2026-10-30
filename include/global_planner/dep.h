@@ -54,6 +54,10 @@ namespace globalPlanner{
 		double verticalFOV_;
 		double dmin_;
 		double dmax_;
+		bool useLidarModel_; // sensor_type: lidar
+		double lidarFovUp_, lidarFovDown_, lidarPitch_; // rad, elevation limits in the lidar frame and nose-down pitch
+		std::vector<Eigen::Matrix3d> yawLidarRotInv_; // lidar-from-world rotation for each candidate yaw
+		double maxEdgeVerticalAngle_; // rad, steepest roadmap edge
 		int nnNum_;
 		int nnNumFrontier_;
 		double maxConnectDist_;
@@ -96,6 +100,9 @@ namespace globalPlanner{
 		void getBestViewCandidates(std::vector<std::shared_ptr<PRM::Node>>& goalCandidates);
 		bool findCandidatePath(const std::vector<std::shared_ptr<PRM::Node>>& goalCandidates,  std::vector<std::vector<std::shared_ptr<PRM::Node>>>& candidatePaths);
 		void findBestPath(const std::vector<std::vector<std::shared_ptr<PRM::Node>>>& candidatePaths, std::vector<std::shared_ptr<PRM::Node>>& bestPath);
+		std::shared_ptr<PRM::Node> getConnectedNode(const Eigen::Vector3d& pos);
+		bool findPathToPoint(const Eigen::Vector3d& goal, nav_msgs::Path& path);
+		int getFrontierNum();
 		
 
 		// callback functions
@@ -110,6 +117,7 @@ namespace globalPlanner{
 		std::shared_ptr<PRM::Node> randomConfigBBox(const Eigen::Vector3d& minRegion, const Eigen::Vector3d& maxRegion);
 		bool sensorRangeCondition(const shared_ptr<PRM::Node>& n1, const shared_ptr<PRM::Node>& n2);
 		bool sensorFOVCondition(const Eigen::Vector3d& sample, const Eigen::Vector3d& pos);
+		bool lidarVisible(const Eigen::Vector3d& direction, int yawIdx);
 		int calculateUnknown(const shared_ptr<PRM::Node>& n, std::unordered_map<double, int>& yawNumVoxels);
 		double calculatePathLength(const std::vector<shared_ptr<PRM::Node>>& path);
 		void shortcutPath(const std::vector<std::shared_ptr<PRM::Node>>& path, std::vector<std::shared_ptr<PRM::Node>>& pathSc);
