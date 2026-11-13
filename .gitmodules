@@ -18,7 +18,7 @@
 	url = https://github.com/Zhefan-Xu/time_optimizer.git
 [submodule "tracking_controller"]
 	path = tracking_controller
-	url = https://github.com/Zhefan-Xu/tracking_controller.git
+	url = https://github.com/hirotakayin/tracking_controller.git
 [submodule "onboard_detector"]
 	path = onboard_detector
 	url = https://github.com/Zhefan-Xu/onboard_detector.git
