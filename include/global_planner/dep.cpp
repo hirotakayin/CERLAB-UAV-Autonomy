@@ -199,9 +199,22 @@ namespace globalPlanner{
 		else{
 			cout << this->hint_ << ": Sensor type: " << sensorType << endl;
 		}
-		this->useLidarModel_ = (sensorType == "lidar");
+		this->useOmniModel_ = (sensorType == "omni360");
+		this->useLidarModel_ = (sensorType == "lidar") or this->useOmniModel_; // omni360 reuses the full-sphere search
 
-		if (this->useLidarModel_){
+		if (this->useOmniModel_){
+			double blindDeg, minAngleDeg;
+			this->nh_.param<double>(this->ns_ + "/omni_blind_cone", blindDeg, 35.0);
+			this->nh_.param<double>(this->ns_ + "/omni_flow_range_s", this->omniFlowRange_, 10.0);
+			this->nh_.param<double>(this->ns_ + "/omni_speed", this->omniSpeed_, 1.0);
+			this->nh_.param<double>(this->ns_ + "/omni_min_angle", minAngleDeg, 5.0);
+			this->omniBlindSin_ = -cos(blindDeg * PI_const / 180.0); // lowest z of a unit direction that is still seen
+			this->omniMinSin_ = sin(minAngleDeg * PI_const / 180.0);
+			this->lidarFovUp_ = PI_const / 2; this->lidarFovDown_ = -PI_const / 2; this->lidarPitch_ = 0.0; // unused, kept sane
+			cout << this->hint_ << ": 360 camera (optic flow): blind cone below " << blindDeg << " deg, range " << this->omniFlowRange_
+			     << " s x " << this->omniSpeed_ << " m/s x sin(angle from travel), min angle " << minAngleDeg << " deg" << endl;
+		}
+		else if (this->useLidarModel_){
 			double fovUpDeg, fovDownDeg, pitchDeg;
 			if (not this->nh_.getParam(this->ns_ + "/lidar_fov_up", fovUpDeg)){
 				fovUpDeg = 52.0;
@@ -507,6 +520,7 @@ namespace globalPlanner{
 	// lidar check: rotate the direction into the lidar frame at this yaw and test its elevation
 	// against the lidar's vertical FOV (full 360 deg in azimuth)
 	bool DEP::lidarVisible(const Eigen::Vector3d& direction, int yawIdx){
+		if (this->useOmniModel_) return this->omniVisible(direction, this->yaws_[yawIdx]);
 		Eigen::Vector3d dirLidar = this->yawLidarRotInv_[yawIdx] * direction;
 		double elevation = atan2(dirLidar.z(), dirLidar.head<2>().norm());
 		return elevation >= this->lidarFovDown_ and elevation <= this->lidarFovUp_;
@@ -1045,8 +1059,22 @@ namespace globalPlanner{
 		reachableNum = this->reachableNodeNum_;
 	}
 
+	// 360 camera ranging by optic flow while travelling along heading yaw: the drone blocks a cone below it, and flow
+	// gives distance only to D <= flowRange * speed * sin(angle from the travel direction) (none straight ahead/behind)
+	bool DEP::omniVisible(const Eigen::Vector3d& direction, double yaw){
+		double distance = direction.norm();
+		if (distance < 1e-6) return false;
+		Eigen::Vector3d unit = direction / distance;
+		if (unit.z() < this->omniBlindSin_) return false;
+		double cosToTravel = unit.x() * cos(yaw) + unit.y() * sin(yaw);
+		double sinToTravel = sqrt(std::max(0.0, 1.0 - cosToTravel * cosToTravel));
+		if (sinToTravel < this->omniMinSin_) return false;
+		return distance <= this->omniFlowRange_ * this->omniSpeed_ * sinToTravel;
+	}
+
 	bool DEP::isInLidarFov(const Eigen::Vector3d& direction, double yaw){
 		if (not this->useLidarModel_) return false;
+		if (this->useOmniModel_) return this->omniVisible(direction, yaw);
 		Eigen::Matrix3d worldRLidar = (Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(this->lidarPitch_, Eigen::Vector3d::UnitY())).toRotationMatrix();
 		Eigen::Vector3d dirLidar = worldRLidar.transpose() * direction;
 		double elevation = atan2(dirLidar.z(), dirLidar.head<2>().norm());
@@ -1091,9 +1119,11 @@ namespace globalPlanner{
 				yawDist += globalPlanner::angleDiff(prevYaw, angle);
 				prevYaw = angle;
 			}
-			// reevaluate the goal node
+			// reevaluate the goal node. A 360 camera ranging by flow sees what its arrival heading allows, not what the best
+			// heading would: it does not turn, and it slows to a stop there
+			double goalYaw = this->useOmniModel_ ? prevYaw : path.back()->getBestYaw();
 			if (blockGain){
-				this->addVisibleGainCells(path.back()->pos, path.back()->getBestYaw(), pathCells);
+				this->addVisibleGainCells(path.back()->pos, goalYaw, pathCells);
 				unknownVoxel = int(pathCells.size()); // each cell once, however many nodes on the path see it
 			}
 			else{
@@ -1101,9 +1131,10 @@ namespace globalPlanner{
 				int unknownVoxelNum = this->calculateUnknown(path.back(), yawNumVoxels);
 				path.back()->numVoxels = unknownVoxelNum;
 				path.back()->yawNumVoxels = yawNumVoxels;
-				unknownVoxel += path.back()->getBestYawVoxel();
+				unknownVoxel += this->useOmniModel_ ? path.back()->getUnknownVoxels(goalYaw) : path.back()->getBestYawVoxel();
 			}
-			yawDist += globalPlanner::angleDiff(prevYaw, path.back()->getBestYaw());
+			yawDist += globalPlanner::angleDiff(prevYaw, goalYaw);
+			if (this->useOmniModel_) yawDist = 0.0; // it holds its yaw (hold_yaw): turning costs nothing
 
 			double distance = this->calculatePathLength(path);
 			// cout << "total is distance is: " << distance << " total yaw distance is: " << yawDist << " voxel: " << path.back()->numVoxels << endl;

@@ -59,8 +59,16 @@ namespace globalPlanner{
 		double verticalFOV_;
 		double dmin_;
 		double dmax_;
-		bool useLidarModel_; // sensor_type: lidar
+		bool useLidarModel_; // sensor_type: lidar, or omni360 (which shares the lidar's full-sphere gain search)
 		double lidarFovUp_, lidarFovDown_, lidarPitch_; // rad, elevation limits in the lidar frame and nose-down pitch
+		// sensor_type: omni360, a 360 camera ranging by optic flow: sees the whole sphere except a cone below the drone,
+		// out to D <= flowRange * speed * sin(angle from the travel heading); the candidate yaw is the travel heading
+		bool useOmniModel_ {false};
+		double omniBlindSin_; // sin of the lowest elevation seen: the drone blocks the cone straight down
+		double omniFlowRange_; // s, eps / sigma_w: the same as flow_limited_cloud.py's flow_range_s
+		double omniSpeed_; // m/s, cruise speed the gain assumes
+		double omniMinSin_; // sin of the smallest angle from the travel heading that is ranged
+		bool omniVisible(const Eigen::Vector3d& direction, double yaw);
 		std::vector<Eigen::Matrix3d> yawLidarRotInv_; // lidar-from-world rotation for each candidate yaw
 		double maxEdgeUpAngle_, maxEdgeDownAngle_; // rad, steepest roadmap edge in flight direction
 		std::atomic<bool> staticEnvironment_ {false}; // no moving obstacles: any slope through fully known free space
