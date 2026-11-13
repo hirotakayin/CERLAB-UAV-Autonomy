@@ -85,6 +85,7 @@ namespace mapManager{
 		Eigen::Matrix4d body2Cam_; // from body frame to camera frame
 
 		// RAYCASTING
+		double inspectRange_ = 0.0; // m, longer rays still map obstacles but do not count as inspecting
 		double raycastMaxLength_;
 		double pHitLog_, pMissLog_, pMinLog_, pMaxLog_, pOccLog_; 
 
@@ -127,6 +128,7 @@ namespace mapManager{
 		std::queue<Eigen::Vector3i> updateVoxelCache_;
 		std::vector<double> occupancy_; // occupancy log data
 		std::vector<bool> occupancyInflated_; // inflated occupancy data
+		std::vector<unsigned char> inspected_; // sticky, 0 if inspect_range is off. 2: a ray ended here from within inspect_range, 4: a ray ended here from further, unconfirmed
 		int raycastNum_ = 0; 
 		std::vector<int> flagTraverse_, flagRayend_;
 		std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions_;
@@ -188,6 +190,9 @@ namespace mapManager{
 		bool isInflatedFree(const Eigen::Vector3d& pos);
 		bool isInflatedFreeLine(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2);
 		bool isUnknown(const Eigen::Vector3d& pos);
+		bool isInspectionPending(const Eigen::Vector3d& pos); // a surface seen only from beyond inspect_range
+		bool isInspectedHit(const Eigen::Vector3d& pos); // a surface, hit from within inspect_range if it is set
+		double getInspectRange();
 		bool isUnknown(const Eigen::Vector3i& idx);
 		void setFree(const Eigen::Vector3d& pos);
 		void setFree(const Eigen::Vector3i& idx);
@@ -239,6 +244,21 @@ namespace mapManager{
 	};
 	// inline function
 	// user function
+	inline bool occMap::isInspectionPending(const Eigen::Vector3d& pos){
+		if (this->inspectRange_ <= 0.0 or not this->isInMap(pos)) return false;
+		return (this->inspected_[this->posToAddress(pos)] & 6) == 4;
+	}
+
+	inline bool occMap::isInspectedHit(const Eigen::Vector3d& pos){
+		if (not this->isInMap(pos)) return false;
+		if (this->inspectRange_ <= 0.0) return this->isOccupied(pos);
+		return (this->inspected_[this->posToAddress(pos)] & 2) != 0;
+	}
+
+	inline double occMap::getInspectRange(){
+		return this->inspectRange_;
+	}
+
 	inline bool occMap::isOccupied(const Eigen::Vector3d& pos){
 		Eigen::Vector3i idx;
 		this->posToIndex(pos, idx);

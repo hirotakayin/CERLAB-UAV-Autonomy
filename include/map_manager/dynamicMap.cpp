@@ -37,7 +37,7 @@ namespace mapManager{
 		std::vector<onboardDetector::box3D> dynamicBBoxes;
 		this->detector_->getDynamicObstacles(dynamicBBoxes);
 		for (onboardDetector::box3D ob:dynamicBBoxes){
-			Eigen::Vector3d lowerBound (ob.x-ob.x_width/2-0.3, ob.y-ob.y_width/2-0.3, 0.0);
+			Eigen::Vector3d lowerBound (ob.x-ob.x_width/2-0.3, ob.y-ob.y_width/2-0.3, ob.z-ob.z_width/2-0.3); // boxes are centred on ob.z, which is below 0 in a pit
 			Eigen::Vector3d upperBound (ob.x+ob.x_width/2+0.3, ob.y+ob.y_width/2+0.3, ob.z+ob.z_width+0.3);
 			freeRegions.push_back(std::make_pair(lowerBound, upperBound));
 		}

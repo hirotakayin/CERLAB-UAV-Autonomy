@@ -192,6 +192,8 @@ namespace mapManager{
 		}
 
 		// Raycast max length
+		this->nh_.param<double>(this->ns_ + "/inspect_range", this->inspectRange_, 0.0);
+		cout << this->hint_ << ": Inspect range: " << this->inspectRange_ << endl;
 		if (not this->nh_.getParam(this->ns_ + "/raycast_max_length", this->raycastMaxLength_)){
 			this->raycastMaxLength_ = 5.0;
 			cout << this->hint_ << ": No raycast max length. Use default: 5.0." << endl;
@@ -302,6 +304,7 @@ namespace mapManager{
 			this->countHit_.resize(reservedSize, 0);
 			this->occupancy_.resize(reservedSize, this->pMinLog_-this->UNKNOWN_FLAG_);
 			this->occupancyInflated_.resize(reservedSize, false);
+			this->inspected_.resize(reservedSize, 0);
 			this->flagTraverse_.resize(reservedSize, -1);
 			this->flagRayend_.resize(reservedSize, -1);
 
@@ -802,6 +805,11 @@ namespace mapManager{
 			if ((currPointMap-this->position_).norm()>=0.5){
 				this->projPoints_[i] = currPointMap;
 			}
+			else{
+				// no return (lidar plugin sends 0,0,0) or too close: skipped by raycastUpdate.
+				// Leaving it would re-use this slot's point from an earlier scan as a hit
+				this->projPoints_[i] = Eigen::Vector3d (NAN, NAN, NAN);
+			}
 		}
 	}
 
@@ -853,6 +861,9 @@ namespace mapManager{
 
 			// update occupancy itself update information
 			rayendVoxelID = this->updateOccupancyInfo(currPoint, not pointAdjusted); // point adjusted is free, not is occupied
+			if (this->inspectRange_ > 0.0 and not pointAdjusted){
+				this->inspected_[rayendVoxelID] |= (currPoint - this->position_).norm() <= this->inspectRange_ ? 2 : 4;
+			}
 
 			// check whether the voxel has already been updated, so no raycasting needed
 			// rayendVoxelID = this->posToAddress(currPoint);
@@ -875,6 +886,9 @@ namespace mapManager{
 				actualPoint(2) += 0.5;
 				actualPoint *= this->mapRes_;
 				raycastVoxelID = this->updateOccupancyInfo(actualPoint, false);
+				if (this->inspectRange_ > 0.0 and (actualPoint - this->position_).norm() <= this->inspectRange_){
+					this->inspected_[raycastVoxelID] &= ~4; // a close ray went straight through: the far hit was wrong
+				}
 
 				// raycastVoxelID = this->posToAddress(actualPoint);
 				if (this->flagTraverse_[raycastVoxelID] == this->raycastNum_){
