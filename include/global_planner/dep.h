@@ -14,6 +14,10 @@
 #include <global_planner/PRMAstar.h>
 #include <global_planner/utils.h>
 #include <opencv2/opencv.hpp>
+#include <array>
+#include <atomic>
+#include <map>
+#include <set>
 
 
 namespace globalPlanner{
@@ -27,6 +31,7 @@ namespace globalPlanner{
 		ros::Publisher candidatePathPub_;
 		ros::Publisher bestPathPub_;
 		ros::Publisher frontierVisPub_;
+		ros::Publisher tourPub_;
 		ros::Subscriber odomSub_;
 		ros::Timer visTimer_;
 
@@ -57,7 +62,8 @@ namespace globalPlanner{
 		bool useLidarModel_; // sensor_type: lidar
 		double lidarFovUp_, lidarFovDown_, lidarPitch_; // rad, elevation limits in the lidar frame and nose-down pitch
 		std::vector<Eigen::Matrix3d> yawLidarRotInv_; // lidar-from-world rotation for each candidate yaw
-		double maxEdgeVerticalAngle_; // rad, steepest roadmap edge
+		double maxEdgeUpAngle_, maxEdgeDownAngle_; // rad, steepest roadmap edge in flight direction
+		std::atomic<bool> staticEnvironment_ {false}; // no moving obstacles: any slope through fully known free space
 		int nnNum_;
 		int nnNumFrontier_;
 		double maxConnectDist_;
@@ -67,6 +73,29 @@ namespace globalPlanner{
 		int maxCandidateNum_;
 		double updateDist_;
 		double yawPenaltyWeight_;
+		Eigen::Vector3d gainRegionMin_, gainRegionMax_; // only unknown voxels here count as gain and frontiers
+		double bestScore_ = 0.0, bestGain_ = 0.0, bestPathTime_ = 0.0; // the chosen path, for logging
+		int candidatePathNum_ = 0;
+		double depthBias_; // goal score multiplier grows with depth in the gain region; 0 = plain DEP
+		double revisitPenalty_; // goal score is divided by 1 + penalty * (earlier goals within 1 m); 0 = plain DEP
+		std::vector<Eigen::Vector3d> pastGoals_;
+		double gainBlockSize_; // m; > 0: gain counts unexplored blocks and unseen floor patches instead of unknown voxels (lidar model only)
+		std::vector<Eigen::Vector3d> gainCells_; // block centres and floor patches left to see, rebuilt each plan
+		// Tour: gain cells are binned into areas, each area gets a viewpoint, and the viewpoints are flown in a short order
+		std::atomic<bool> tourEnabled_ {false}, tourReset_ {false};
+		double tourBinSize_; // m, side of an area
+		int tourMinCells_; // smaller leftovers are not worth a trip
+		double tourMinShare_; // areas smaller than this share of the largest wait until the large ones are done
+		int tourMaxVisits_; // viewpoints tried for an area before giving up on it
+		std::vector<std::shared_ptr<PRM::Node>> tourStops_; // current order, for the dashboard
+		std::vector<std::array<int, 3>> tourOrder_; // areas in that order, kept between plans so the order stays stable
+		std::map<std::array<int, 3>, std::vector<Eigen::Vector3d>> tourUsedViews_;
+		bool tourDone_ = false, tourPlanActive_ = false;
+		double tourGoalYaw_ = 0.0;
+		int tourCellsLeft_ = 0, tourGivenUp_ = 0;
+		double maxUnknownGap_; // m, longest unknown stretch allowed on a roadmap edge; 0 = every voxel must be known free
+		int reachableNodeNum_ = 0;
+		double minGoalDist_; // m, goals closer than this are only used when nothing further has gain
 
 		// data
 		bool odomReceived_ = false;
@@ -103,6 +132,16 @@ namespace globalPlanner{
 		std::shared_ptr<PRM::Node> getConnectedNode(const Eigen::Vector3d& pos);
 		bool findPathToPoint(const Eigen::Vector3d& goal, nav_msgs::Path& path);
 		int getFrontierNum();
+		bool setTourEnabled(bool enabled);
+		bool isTourEnabled();
+		void setStaticEnvironment(bool enabled);
+		bool isStaticEnvironment();
+		bool isTourDone();
+		void resetTour();
+		void getTourStats(int& cellsLeft, int& givenUp);
+		bool isInLidarFov(const Eigen::Vector3d& direction, double yaw);
+		void getRoadmapStats(int& nodeNum, int& reachableNum);
+		void getBestPathScore(double& score, double& gain, double& pathTime, int& candidateNum);
 		
 
 		// callback functions
@@ -115,10 +154,17 @@ namespace globalPlanner{
 		bool isPosValid(const Eigen::Vector3d& p);
 		bool isPosValid(const Eigen::Vector3d& p, double safeDistXY, double safeDistZ);
 		std::shared_ptr<PRM::Node> randomConfigBBox(const Eigen::Vector3d& minRegion, const Eigen::Vector3d& maxRegion);
-		bool sensorRangeCondition(const shared_ptr<PRM::Node>& n1, const shared_ptr<PRM::Node>& n2);
+		bool edgeAllowed(const Eigen::Vector3d& from, const Eigen::Vector3d& to);
 		bool sensorFOVCondition(const Eigen::Vector3d& sample, const Eigen::Vector3d& pos);
 		bool lidarVisible(const Eigen::Vector3d& direction, int yawIdx);
 		int calculateUnknown(const shared_ptr<PRM::Node>& n, std::unordered_map<double, int>& yawNumVoxels);
+		bool useBlockGain();
+		double gainRange();
+		bool planTour();
+		void publishTour();
+		void updateGainCells();
+		bool gainCellInSight(const Eigen::Vector3d& cell, const Eigen::Vector3d& pos);
+		void addVisibleGainCells(const Eigen::Vector3d& pos, double yaw, std::unordered_set<int>& cells);
 		double calculatePathLength(const std::vector<shared_ptr<PRM::Node>>& path);
 		void shortcutPath(const std::vector<std::shared_ptr<PRM::Node>>& path, std::vector<std::shared_ptr<PRM::Node>>& pathSc);
 		int weightedSample(const std::vector<double>& weights);

@@ -8,6 +8,7 @@
 #define PRM_ASTAR_H
 
 #include <queue>
+#include <functional>
 #include <global_planner/PRMKDTree.h>
 
 namespace PRM{
@@ -16,10 +17,27 @@ namespace PRM{
 		return not (got == close.end());
 	}
 
+	// line check tolerating short unknown gaps: lidar rays near the edge of the FOV are sparse, so known-free
+	// space has small holes that a strict check treats as walls. Never passes an occupied (inflated) voxel
+	inline bool isClearLine(const std::shared_ptr<mapManager::occMap>& map, const Eigen::Vector3d& p1, const Eigen::Vector3d& p2, double maxUnknownGap){
+		if (maxUnknownGap <= 0.0) return map->isInflatedFreeLine(p1, p2);
+		double dist = (p2 - p1).norm(), res = map->getRes(), unknownRun = 0.0;
+		int stepNum = int(dist/res) + 1;
+		for (int i=0; i<=stepNum; ++i){
+			Eigen::Vector3d p = p1 + (p2 - p1) * double(i)/double(stepNum);
+			if (map->isInflatedOccupied(p)) return false;
+			unknownRun = map->isUnknown(p) ? unknownRun + dist/stepNum : 0.0;
+			if (unknownRun > maxUnknownGap) return false;
+		}
+		return true;
+	}
+
 	std::vector<std::shared_ptr<Node>> AStar(const std::shared_ptr<KDTree>& roadmap,
 										     const std::shared_ptr<Node>& start,
 										     const std::shared_ptr<Node>& goal,
-										     const std::shared_ptr<mapManager::occMap>& map){
+										     const std::shared_ptr<mapManager::occMap>& map,
+										     double maxUnknownGap = 0.0,
+										     const std::function<bool(const Eigen::Vector3d&, const Eigen::Vector3d&)>& edgeAllowed = nullptr){
 		std::vector<std::shared_ptr<Node>> path;
 
 		// open: priority queue
@@ -61,7 +79,7 @@ namespace PRM{
 			for (std::shared_ptr<Node> neighborNode : currNode->adjNodes){
 				// Node must be not in close
 				if (not inClose(neighborNode, close)){
-					if (map->isInflatedFreeLine(currNode->pos, neighborNode->pos)){
+					if ((not edgeAllowed or edgeAllowed(currNode->pos, neighborNode->pos)) and isClearLine(map, currNode->pos, neighborNode->pos, maxUnknownGap)){
 						double cost = currNode->g + (currNode->pos - neighborNode->pos).norm();
 						if (cost < neighborNode->g){
 							neighborNode->g = cost;
