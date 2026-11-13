@@ -6,4 +6,9 @@
 	<!-- Mid-360 in quadcopter_lidar.urdf: 0.13 m up, pitched 23.5 deg nose-down (args: x y z yaw pitch roll) -->
 	<node pkg="tf" type="static_transform_publisher" name="baselink_lidarlink"
       args="0 0 0.13 0 0.4102 0 base_link lidar_link 1000" />
+	<!-- ideal 360 depth sensor in quadcopter_omni.urdf (sensor:=omni): level, 0.24 m up, where the Insta360 sits -->
+	<node pkg="tf" type="static_transform_publisher" name="baselink_omnilink"
+      args="0 0 0.24 0 0 0 base_link omni_link 1000" />
+	<node pkg="tf" type="static_transform_publisher" name="omni_insta360_front" args="0 0 0 0 0 0 omni_link insta360_front 1000" />
+	<node pkg="tf" type="static_transform_publisher" name="omni_insta360_back" args="0 0 0 3.14159265 0 0 omni_link insta360_back 1000" />
 </launch>

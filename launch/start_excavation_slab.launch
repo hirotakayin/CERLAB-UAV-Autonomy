@@ -18,10 +18,20 @@
   </include>
 
   <!-- lidar:=true spawns the drone with the tilted Mid-360 (quadcopter_lidar.urdf) as well as the depth camera -->
-  <group if="$(arg lidar)">
+  <!-- sensor:=omni swaps the Mid-360 for the ideal 360 depth sensor (opti360): quadcopter_omni.urdf, raw points on
+       /omni/cloud_raw, and flow_limited_cloud.py publishing what optic flow could range on /omni/cloud_flow -->
+  <arg name="sensor" default="lidar" />
+  <arg name="flow_range_s" default="10.0" />
+  <group if="$(eval arg('lidar') and arg('sensor') == 'lidar')">
     <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter_lidar.urdf'" />
   </group>
-  <group unless="$(arg lidar)">
+  <group if="$(eval arg('sensor') == 'omni')">
+    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter_omni.urdf'" />
+    <node pkg="uav_simulator" type="flow_limited_cloud.py" name="flow_limited_cloud">
+      <param name="flow_range_s" value="$(arg flow_range_s)" />
+    </node>
+  </group>
+  <group if="$(eval not arg('lidar') and arg('sensor') == 'lidar')">
     <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter.urdf'" />
   </group>
 
