@@ -6,6 +6,8 @@
 #include <gazebo/common/Assert.hh>
 #include <gazebo/common/Exception.hh>
 #include <gazebo/physics/World.hh>
+#include <gazebo/physics/Model.hh>
+#include <gazebo/physics/Link.hh>
 #include <gazebo/physics/ode/ODETypes.hh>
 #include <gazebo/physics/ode/ODELink.hh>
 #include <gazebo/physics/ode/ODECollision.hh>
@@ -137,6 +139,14 @@ void LivoxOdeMultiRayShape::UpdateCallback(void *_data, dGeomID _o1, dGeomID _o2
             hitCollision = static_cast<ODECollision*>(collision1);
             dGeomRaySetParams(_o2, 0, 0);
             dGeomRaySetClosestHit(_o2, 1);
+        }
+
+        // A lidar does not see the robot carrying it. Without this, rays from a sensor
+        // mounted above the body hit the body and are dropped by the minimum range
+        if (rayCollision && hitCollision &&
+            hitCollision->GetLink()->GetModel() == self->collisionParent->GetLink()->GetModel())
+        {
+            return;
         }
 
         // Check for ray/collision intersections
