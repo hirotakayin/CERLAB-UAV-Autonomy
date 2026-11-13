@@ -231,6 +231,11 @@ namespace controller{
 		Eigen::Vector4d attitudeRefQuat;
 		Eigen::Vector3d accRef;
 		this->computeAttitudeAndAccRef(attitudeRefQuat, accRef);
+		if (not accRef.allFinite() or not attitudeRefQuat.allFinite()){ // keep the last command rather than breaking the vehicle
+			cout << "\033[1;31m[trackingController]: Non-finite command dropped.\033[0m" << endl;
+			this->targetReceived_ = false;
+			return;
+		}
 
 		
 		if (this->bodyRateControl_){
@@ -449,8 +454,10 @@ namespace controller{
 			this->firstTime_ = false;
 		}
 		else{
-			this->deltaPosError_ = (positionError - this->prevPosError_)/this->deltaTime_; this->prevPosError_ = positionError;
-			this->deltaVelError_ = (velocityError - this->prevPosError_)/this->deltaTime_; this->prevVelError_ = velocityError;
+			if (this->deltaTime_ > 0.0){ // sim time can stand still between callbacks: 0/0 here sends NaN to the motors, even with zero D gains
+				this->deltaPosError_ = (positionError - this->prevPosError_)/this->deltaTime_; this->prevPosError_ = positionError;
+				this->deltaVelError_ = (velocityError - this->prevVelError_)/this->deltaTime_; this->prevVelError_ = velocityError;
+			}
 		}
 		
 		// mask out the velocity input if needed

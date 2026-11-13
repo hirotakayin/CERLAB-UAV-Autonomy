@@ -17,7 +17,7 @@ position_i: [0.0, 0.0, 0.1]
 position_d: [0.0, 0.0, 0.0]
 
 # Velocity
-velocity_p: [1.0, 1.0, 1.0]
+velocity_p: [1.0, 1.0, 2.0] # z raised from 1.0: 0.8 m height overshoot after long climbs and descents, x and y only about 0.1 m
 velocity_i: [0.0, 0.0, 0.0]
 velocity_d: [0.0, 0.0, 0.0]
 
