@@ -202,7 +202,7 @@ def main():
     # boxes as plywood crates
     for i, (size, (x, y)) in enumerate(BOXES):
         parts.append(box_collision('box_%d' % i, size, (x, y, size[2] / 2, 0, 0, 0)))
-        parts.append(box_visual('box_%d' % i, size, (x, y, size[2] / 2, 0, 0, 0), 'Corridor/Plywood'))
+        parts.append(box_visual('box_%d_visual' % i, size, (x, y, size[2] / 2, 0, 0, 0), 'Corridor/Plywood'))
     # paintings: thin frames on the inner faces of the long walls, kept clear of each other
     placed = {Y0: [], Y1: []}
     k = 0
