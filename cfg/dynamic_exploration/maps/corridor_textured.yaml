@@ -1,0 +1,22 @@
+# corridor_textured: the corridor_dynamic_9 world with concrete, crates and paintings (uav_simulator
+# make_corridor_textured.py). Inner faces x [-0.5, 40.5], y [-2.5, 2.5], walls 2.5 m tall, open top, nine boxes and
+# nine people walking. Start the sim with start_corridor_textured.launch
+autonomous_flight:
+  map_name: corridor_textured
+  # up to 1.2 m at the west end, then a short way down the corridor facing +x
+  initial_waypoints: [1.0, 0.0, 1.2, 0.0,
+                      2.5, 0.0, 1.2, 0.0]
+  progress_region_min: [-0.4, -2.4, 0.0] # corridor interior, floor to wall top
+  progress_region_max: [40.4, 2.4, 2.5]
+  floor_z: 0.0
+
+DEP:
+  global_region_min: [-0.2, -2.2, 0.6] # goals between 0.6 and 2.0 m: under the wall tops, above the people's feet
+  global_region_max: [40.2, 2.2, 2.0]
+  gain_region_min: [-0.4, -2.4, -0.2]
+  gain_region_max: [40.4, 2.4, 2.5]
+  depth_bias: 0.0 # no pit to go down into
+  static_environment: false # people walk through it
+
+rrt/env_box: [-2.0, 42.0, -4.0, 4.0, -0.5, 3.5]
+bspline_traj/min_height: 0.3

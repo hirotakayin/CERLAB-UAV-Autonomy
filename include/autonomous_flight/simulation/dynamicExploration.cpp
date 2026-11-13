@@ -137,6 +137,10 @@ namespace AutoFlight{
 		this->nh_.param<std::string>("autonomous_flight/run_save_dir", this->runSaveDir_, ""); // empty = ~/mission_runs
 		this->nh_.param<double>("autonomous_flight/complete_min_gain", this->completeMinGain_, 1.0);
 		this->nh_.param<int>("autonomous_flight/complete_stall_plans", this->completeStallPlans_, 0); // off unless a config sets it
+		this->nh_.param<double>("autonomous_flight/peer_amplitude", this->peerAmplitude_, 0.0); // sensors/omni.yaml turns it on
+		this->nh_.param<bool>("autonomous_flight/hold_yaw", this->holdYaw_, false);
+		if (this->holdYaw_) cout << "[AutoFlight]: Holding yaw: no turning to face legs or waypoints (360 camera)" << endl;
+		if (this->peerAmplitude_ > 0) cout << "[AutoFlight]: Peering before each plan: sideways sweep of +-" << this->peerAmplitude_ << " m" << endl;
 		this->nh_.param<double>("autonomous_flight/stuck_land_time", this->stuckLandTime_, 15.0); // s hovering with no way home before landing where it is
 		this->nh_.param<std::string>("autonomous_flight/takeoff_topic", this->takeoffTopic_, "/CERLAB/quadcopter/takeoff");
 
@@ -493,8 +497,9 @@ namespace AutoFlight{
 			// std::cin.clear();
 			// fflush(stdin);
 			// std::cin.get();
+			if (std::hypot(dx, dy) >= 0.3) this->travelHeading_ = atan2(dy, dx);
 			int motionGen = this->motionGen_;
-			this->moveToOrientation(yaw, this->desiredAngularVel_);
+			if (not this->holdYaw_) this->moveToOrientation(yaw, this->desiredAngularVel_);
 			if (motionGen != this->motionGen_) return; // a command replaced this leg while rotating
 			// cout << "[AutoFlight]: Press ENTER to move forward." << endl;
 			// std::cin.clear();
@@ -529,7 +534,7 @@ namespace AutoFlight{
 			double yaw = AutoFlight::rpy_from_quaternion(quat);
 			int motionGen = this->motionGen_;
 			this->waitTime(this->wpStablizeTime_);
-			this->moveToOrientation(yaw, this->desiredAngularVel_);
+			if (not this->holdYaw_) this->moveToOrientation(yaw, this->desiredAngularVel_);
 			cout << "[AutoFlight]: Finish rotation." << endl;
 			if (motionGen != this->motionGen_) return; // a command replaced this leg while rotating: it did not finish
 			// cout << "[AutoFlight]: Press ENTER to move forward." << endl;
@@ -587,8 +592,9 @@ namespace AutoFlight{
 
 		if (this->trajectoryReady_){
 			// only exploration goals must be known free with a safety margin (DEP check); entry, return, inspection
-			// and landing goals may lie in unobserved space (e.g. the lidar's blind cone), so only reject them when occupied
-			if (this->missionState_ != EXPLORE){
+			// and landing goals may lie in unobserved space (e.g. the lidar's blind cone), so only reject them when occupied.
+			// A peer is a sensing move to look before going, so its sideways ends are usually not observed yet either
+			if (this->missionState_ != EXPLORE or this->peering_){
 				if (not this->isGoalValid()){
 					this->trajectoryReady_ = false;
 					this->replan_ = false;
@@ -959,6 +965,19 @@ namespace AutoFlight{
 
 			if (this->missionState_ != EXPLORE or not this->explorationReplan_) continue;
 
+			// peer first: flow sees nothing straight ahead, so sweep sideways to range what lies ahead before choosing a goal
+			if (this->peerAmplitude_ > 0 and not this->peeredSincePlan_){
+				this->peeredSincePlan_ = true;
+				nav_msgs::Path peer;
+				if (this->makePeerPath(peer)){
+					this->explorationReplan_ = false;
+					this->peering_ = true;
+					this->setPendingPath(peer, EXPLORE);
+					continue;
+				}
+			}
+			this->peeredSincePlan_ = false;
+
 			this->expPlanner_->setMap(this->map_);
 			ros::WallTime startTime = ros::WallTime::now(); // wall clock: sim time reads short when the sim runs slower than real time
 			bool replanSuccess = this->expPlanner_->makePlan();
@@ -1279,7 +1298,11 @@ namespace AutoFlight{
 	void dynamicExploration::onPathFinished(bool success, const char* reason){
 		// the current leg ended (reached its last waypoint, or was aborted): decide what comes next
 		int state = this->missionState_;
-		if (state == EXPLORE){
+		if (state == EXPLORE and this->peering_){ // a peer, not a plan: it says nothing about the plan before it
+			this->peering_ = false;
+			if (not success) this->logEvent(std::string("Peer cut short: ") + reason);
+		}
+		else if (state == EXPLORE){
 			this->lastPathEnd_ = reason;
 			if (not success) this->logEvent(std::string("Plan dropped: ") + reason);
 		}
@@ -1450,6 +1473,30 @@ namespace AutoFlight{
 			}
 		}
 		return false;
+	}
+
+	// a sideways sweep across the current heading: out to one side, across to the other, back to the start. Each side
+	// is shortened (to half, then to nothing) when the map shows an obstacle on the way
+	bool dynamicExploration::makePeerPath(nav_msgs::Path& path){
+		Eigen::Vector3d p = this->currPos();
+		double yaw = AutoFlight::rpy_from_quaternion(this->odom_.pose.pose.orientation);
+		double across = this->holdYaw_ ? this->travelHeading_ : yaw; // sweep across the way it was going
+		Eigen::Vector3d side (-sin(across), cos(across), 0.0);
+		auto reach = [&](double sign){
+			for (double a : {this->peerAmplitude_, this->peerAmplitude_ / 2}){
+				Eigen::Vector3d q = p + sign * a * side;
+				if (not this->map_->isInflatedOccupied(q) and not this->map_->isInflatedOccupiedLine(p, q)) return a;
+			}
+			return 0.0;
+		};
+		double left = reach(1.0), right = reach(-1.0);
+		if (left + right < 0.5) return false; // boxed in sideways: plan from here
+		std::vector<Eigen::Vector3d> points {p};
+		if (left > 0) points.push_back(p + left * side);
+		if (right > 0) points.push_back(p - right * side);
+		points.push_back(p);
+		path = this->makePath(points, yaw);
+		return true;
 	}
 
 	nav_msgs::Path dynamicExploration::makePath(const std::vector<Eigen::Vector3d>& points, double finalYaw){

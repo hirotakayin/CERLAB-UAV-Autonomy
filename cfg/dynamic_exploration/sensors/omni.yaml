@@ -1,0 +1,30 @@
+# sensor:=omni: a 360 camera (Insta360-style) ranging by optic flow, simulated by the ideal 360 depth sensor in
+# uav_simulator (start_<map>.launch sensor:=omni). Loaded after the map and preset, so it wins over both.
+DEP:
+  sensor_type: omni360
+  omni_blind_cone: 35.0 # deg, half-angle of the cone below the drone that its body hides (make_omni_pattern.py --blind)
+  omni_flow_range_s: 10.0 # s, D <= this * speed * sin(angle from travel); = flow_limited_cloud.py flow_range_s
+  omni_speed: 0.7 # m/s, the average speed the gain assumes: legs are short (2-4 m), so well under the 1.5 cruise
+  omni_min_angle: 5.0 # deg, nothing is ranged closer than this to the travel direction
+  # the camera sees up and down as well as ahead, so roadmap edges are not limited by a lidar elevation band
+  max_edge_down_angle: 60.0
+  max_edge_up_angle: 60.0
+
+dynamic_map:
+  point_cloud_topic: /omni/cloud_flow # flow_limited_cloud.py: the points flow could range at the current velocity
+  # omni_link: level, 0.24 m above base_link (setupTF.launch)
+  body_to_camera: [1.0, 0.0, 0.0, 0.0,
+                   0.0, 1.0, 0.0, 0.0,
+                   0.0, 0.0, 1.0, 0.24,
+                   0.0, 0.0, 0.0, 1.0]
+
+autonomous_flight:
+  peer_amplitude: 1.0 # m, sideways sweep before each plan so flow can range what lies ahead (0 = off)
+  hold_yaw: true # a 360 camera needs no turning; turning in place gives flow no depth
+  waypoint_stablize_time: 0.2 # s, pause at each waypoint (1.0 with the lidar): a stop is zero speed, zero range
+  # flow ranges out to flow_range_s x speed: fly faster than with the lidar (1.0 m/s, 1.0 m/s^2)
+  desired_velocity: 1.5
+  desired_acceleration: 1.5
+  complete_stall_plans: 5 # each plan adds less than with the lidar: give it longer before calling it done
+
+poly_traj/desired_velocity: 1.5

@@ -129,6 +129,16 @@ namespace AutoFlight{
 		};
 		std::vector<PlanRecord> planLog_;
 		std::atomic<const char*> lastPathEnd_ {""};
+		// peering (sensor:=omni): before each exploration plan, a short sideways sweep and back, so a camera ranging by
+		// optic flow sees ahead (flow gives no range in the direction of travel). peer_amplitude 0 = off
+		double peerAmplitude_ {0.0};
+		std::atomic<bool> peering_ {false}; // the path being flown is a peer, not a plan
+		bool peeredSincePlan_ {false};
+		// hold_yaw (sensor:=omni): a 360 camera needs no turning, so never rotate to face a leg or a waypoint's heading.
+		// Turning in place gives optic flow no depth, and costs time at zero speed
+		bool holdYaw_ {false};
+		double travelHeading_ {0.0}; // direction of the last leg, which peering sweeps across
+		bool makePeerPath(nav_msgs::Path& path);
 		double lastPlanSeconds_ = 0.0;
 		ros::Publisher planLogPub_;
 		std::atomic<int> frontierNum_ {-1};

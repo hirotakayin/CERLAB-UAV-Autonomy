@@ -10,6 +10,7 @@ mission CSVs into the numbers for each run.
   rosrun autonomous_flight run_batch.py                          # every pit with baseline, gain and EPIC, 3 times each
   rosrun autonomous_flight run_batch.py --maps excavation1 excavation_slab --presets gain epic --repeats 3
   rosrun autonomous_flight run_batch.py --presets gain --repeats 1 --parallel 1 --speed 2
+  rosrun autonomous_flight run_batch.py --sensor omni --presets baseline gain --out ~/mission_runs/batch_x   # 360 camera, same batch
 
 Every run is recorded from the dashboard, without voxels (record_dashboard.py's paths view), to
 <run>/<run>_paths.mp4; --no-record skips it. Log lines are stamped with the wall clock and clock.csv pairs it with the
@@ -40,7 +41,7 @@ MAPS = sorted(os.path.splitext(f)[0] for f in os.listdir(os.path.join(CFG, 'maps
 ROS_PORT = 11411 # not the defaults, so a sim started by hand is left alone
 GAZEBO_PORT = 11545
 FIELDS = ['run', 'map', 'preset', 'repeat', 'slot', 'status', 'wall_s', 'mission_s', 'mean_rtf', 'min_rtf',
-          'floor_pct', 'block_pct', 'surface_pct', 'last_state', 'csv', 'video']
+          'floor_pct', 'block_pct', 'surface_pct', 'last_state', 'csv', 'video', 'sensor']
 POLL_SECONDS = 10
 BRIDGE_PORT = 9190 # the recording's rosbridge; not 9090, so a dashboard started by hand is left alone
 PAGE_PORT = 8790
@@ -63,8 +64,12 @@ def schedule(maps, presets, repeats):
     return runs
 
 
+SENSOR = 'lidar' # --sensor; runs with another sensor are named <map>_<preset>_<sensor>_r<n>, so they can share a batch
+
+
 def run_name(run):
-    return '%s_%s_r%d' % run
+    pit, preset, repeat = run
+    return '%s_%s_r%d' % run if SENSOR == 'lidar' else '%s_%s_%s_r%d' % (pit, preset, SENSOR, repeat)
 
 
 def set_speed(env, speed):
@@ -195,7 +200,7 @@ def fly(args, pit, preset, repeat, slot, run_dir):
                ROS_LOG_DIR=os.path.join(run_dir, 'roslogs'),
                CERLAB_BATCH_RUN=marker)
     row = dict.fromkeys(FIELDS, '')
-    row.update(run=os.path.basename(run_dir), map=pit, preset=preset, repeat=repeat, slot=slot)
+    row.update(run=os.path.basename(run_dir), map=pit, preset=preset, repeat=repeat, slot=slot, sensor=args.sensor)
     sim = planner = bridge = recorder = None
     sim_log, planner_log = os.path.join(run_dir, 'sim.log'), os.path.join(run_dir, 'planner.log')
     start_time = time.time()
@@ -207,7 +212,8 @@ def fly(args, pit, preset, repeat, slot, run_dir):
                                 'gui:=false', 'run_save_dir:=' + run_dir], env, sim_log)
             odom = ['rostopic', 'echo', '-n', '1', '/quad_0/lidar_slam/odom']
         else:
-            sim_args = ['roslaunch', '-p', str(ROS_PORT + slot), 'uav_simulator', 'start_%s.launch' % pit, 'gui:=false', 'keyboard:=false']
+            sim_args = ['roslaunch', '-p', str(ROS_PORT + slot), 'uav_simulator', 'start_%s.launch' % pit, 'gui:=false', 'keyboard:=false',
+                        'sensor:=' + args.sensor]
             if pit == 'excavation1': sim_args.append('crane:=%s' % str(args.crane).lower())
             sim = start_logged(sim_args, env, sim_log)
             odom = ['rostopic', 'echo', '-n', '1', '/CERLAB/quadcopter/odom']
@@ -224,7 +230,8 @@ def fly(args, pit, preset, repeat, slot, run_dir):
                     row['status'] = 'speed_failed: ' + problem
                     return row
             command(env, ['rosparam', 'set', '/autonomous_flight/run_save_dir', run_dir], 15)
-            planner = start_logged(['roslaunch', 'autonomous_flight', 'dynamic_exploration.launch', 'map:=' + pit, 'preset:=' + preset, 'gui:=false'],
+            planner = start_logged(['roslaunch', 'autonomous_flight', 'dynamic_exploration.launch', 'map:=' + pit, 'preset:=' + preset, 'gui:=false',
+                                    'sensor:=' + args.sensor],
                                    env, planner_log)
         if args.record:
             bridge, recorder = start_recording(args, env, slot, run_dir)
@@ -340,9 +347,16 @@ def main():
     parser.add_argument('--crane', action='store_true', help='add the crane load to excavation1')
     parser.add_argument('--speed', type=float, default=1.0, help='Gazebo real-time limit, e.g. 2 or 4. Only reached if the computer keeps up: see mean_rtf. EPIC always runs in real time')
     parser.add_argument('--out', default=os.path.expanduser('~/mission_runs/batch_' + time.strftime('%Y%m%d_%H%M%S')))
+    parser.add_argument('--sensor', default='lidar', choices=['lidar', 'omni'],
+                        help='omni: the ideal 360 optic-flow camera (opti360) instead of the Mid-360, for DEP presets; runs are named ..._omni_r<n>')
     parser.add_argument('--dry-run', action='store_true', help='print the runs and exit')
     args = parser.parse_args()
     args.out = os.path.abspath(args.out)
+    global SENSOR
+    SENSOR = args.sensor
+    if args.sensor != 'lidar' and 'epic' in args.presets:
+        print('EPIC flies its own simulator and lidar: --sensor %s works with the DEP presets only' % args.sensor)
+        return 1
 
     results_path = os.path.join(args.out, 'results.csv')
     done = set()

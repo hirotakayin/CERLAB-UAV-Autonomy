@@ -307,7 +307,10 @@ def main():
     results = list(csv.DictReader(open(os.path.join(batch, 'results.csv'))))
     order = {'excavation1': 0, 'excavation_long': 1, 'excavation_slab': 2}
     planner_order = {'baseline': 0, 'gain': 1, 'epic': 2}
-    results.sort(key=lambda r: (order.get(r['map'], 9), planner_order.get(r['preset'], 9), int(r['repeat'] or 0)))
+    # a run with another sensor than the lidar (run_batch.py --sensor) is its own row: gain_omni next to gain
+    label = lambda r: r['preset'] if r.get('sensor', 'lidar') in ('', 'lidar') else r['preset'] + '_' + r['sensor']
+    rank = lambda name: (planner_order.get(name.split('_')[0], 9), name)
+    results.sort(key=lambda r: (order.get(r['map'], 9), rank(label(r)), int(r['repeat'] or 0)))
 
     # the numbers, as summarize_runs.py computes them
     summaries = {}
@@ -342,8 +345,8 @@ def main():
     groups = {}
     for r in results:
         s = summaries.get(r['run'])
-        if s and 'explore_s' in s and r['run'] not in args.exclude: groups.setdefault((r['map'], r['preset']), []).append((r, s))
-    for (pit, preset), items in sorted(groups.items(), key=lambda kv: (order.get(kv[0][0], 9), planner_order.get(kv[0][1], 9))):
+        if s and 'explore_s' in s and r['run'] not in args.exclude: groups.setdefault((r['map'], label(r)), []).append((r, s))
+    for (pit, preset), items in sorted(groups.items(), key=lambda kv: (order.get(kv[0][0], 9), rank(kv[0][1]))):
         cells = []
         for key, _, dec in cols:
             vals = [s[key] for _, s in items if s.get(key) is not None]
