@@ -1,0 +1,20 @@
+# excavation_long: pit x [0, 14], y [5, 35], z [-10, 0], two hidden regions (see the model's model.config).
+# Loaded over the excavation1 configs and under the preset, so presets work on it unchanged
+autonomous_flight:
+  map_name: excavation_long
+  # over the near rim, then down the open lane on the right, facing +y into the pit. Hand over to DEP at -2 m
+  initial_waypoints: [10.0, 3.5,  1.0, 90.0,
+                      10.0, 8.0,  1.0, 90.0,
+                      10.0, 8.0, -2.0, 90.0]
+  progress_region_min: [0.2, 5.2, -9.8] # pit interior, floor to rim. The collapses fill about 2% of it
+  progress_region_max: [13.8, 34.8, 0.0]
+  floor_z: -10.0 # scores the run only. The collapses stand on about 4% of the floor
+
+DEP:
+  global_region_min: [-1.0, 1.0, -8.8] # pit plus the start apron. Lowest goal 1.2 m above the floor, as in excavation1
+  global_region_max: [15.0, 36.0, 3.0]
+  gain_region_min: [0.2, 5.2, -10.2] # reaches below the floor so floor hits fall inside blocks; sized from this pit's known depth
+  gain_region_max: [13.8, 34.8, 0.0]
+
+rrt/env_box: [-10.0, 24.0, -10.0, 45.0, -10.0, 5.0]
+bspline_traj/min_height: -9.5

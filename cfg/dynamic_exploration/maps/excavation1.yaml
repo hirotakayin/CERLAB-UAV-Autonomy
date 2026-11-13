@@ -1,0 +1,4 @@
+# excavation1 needs no overrides: the configs in cfg/dynamic_exploration are written for it.
+# Another map overrides here whatever depends on the pit's size: see excavation_long.yaml
+autonomous_flight:
+  map_name: excavation1

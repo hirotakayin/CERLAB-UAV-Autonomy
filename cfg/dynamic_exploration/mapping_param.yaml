@@ -7,7 +7,7 @@ pose_topic: /CERLAB/quadcopter/pose
 odom_topic: /CERLAB/quadcopter/odom
 
 # robot size
-robot_size: [0.5, 0.5, 0.3]
+robot_size: [1.0, 1.0, 1.0] # keeps the centre about 0.6 m from beams; the drone itself is 0.51 x 0.49 x 0.15 m
 
 # Camera Parameters
 depth_intrinsics: [554.254691191187, 554.254691191187, 320.5, 240.5] # fx,  fy, cx, cy
@@ -31,6 +31,7 @@ body_to_camera: [ 0.917060, 0.0, 0.398749, 0.0,
 
 # Raycasting
 raycast_max_length: 20.0
+inspect_range: 10.0 # m, a surface only counts as inspected from this close; open air clears from any range and longer rays still map obstacles. 0 = off
 p_hit: 0.70
 p_miss: 0.35
 p_min: 0.12
@@ -41,7 +42,7 @@ p_occ: 0.80
 map_resolution: 0.2
 ground_height: -16.5 # m, bottom of the map: just below the excavation1 pit floor (-16 m)
 map_size: [46, 80, 21] # x, y centred on the origin: x [-23, 23], y [-40, 40]; z [ground_height, ground_height + 21] = [-16.5, 4.5]
-local_update_range: [6, 6, 6]
+local_update_range: [20, 20, 21] # map everything the lidar returns within raycast_max_length; a small box clips scans to a rectangle
 local_bound_inflation: 2.0 # inflate local bound in meter
 clean_local_map: false
 

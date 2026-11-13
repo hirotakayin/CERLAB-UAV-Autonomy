@@ -3,8 +3,15 @@ odom_topic: "/mavros/local_position/odom"
 
 local_region_min: [-6, -6, -6]
 local_region_max: [6, 6, 6]
-global_region_min: [-1.0, 1.0, -7.5] # excavation_simple: pit x [0, 6], y [5, 17], z [-8, 0] plus the start apron
+global_region_min: [-1.0, 1.0, -6.8] # excavation_simple: pit x [0, 6], y [5, 17], z [-8, 0] plus the start apron. Lowest goal -6.8: stops overshoot 0.5 m and -7.5 came within 0.1 m of the floor
 global_region_max: [7.0, 18.0, 3.0]
+# Only the pit interior counts as gain and frontiers: unknown voxels in the walls or under the ground never clear
+gain_region_min: [0.2, 5.2, -8.2] # reaches below the floor so floor hits fall inside blocks; a rough lower bound, not the floor height
+gain_region_max: [5.8, 16.8, 0.0]
+min_goal_distance: 1.5 # m, skip closer goals while further ones have gain. 3.0 made it cross the 6 m wide pit on most plans
+max_unknown_gap: 0.6 # m, unknown stretch allowed on a roadmap edge; rays are sparse near the lower FOV edge. 0 = strict DEP
+depth_bias: 4.0 # goal score x (1 + bias * depth^2), depth 0 at the top of the gain region, 1 at the bottom; 0 = plain DEP
+revisit_penalty: 2.0 # goal score / (1 + penalty * earlier goals within 1 m); 0 = plain DEP
 
 # Reduced per-iteration sampling budget to lower graph update spikes
 local_sample_thresh: 100        # Down from 200
@@ -30,8 +37,10 @@ lidar_pitch: 23.5
 dmin: 0.3
 dmax: 7.0 # info-gain range; cost grows with dmax^3 (10 m took ~13 s per plan)
 
-# Steepest roadmap edge (deg). Edges must still be known free, so steep edges are safe with lidar; the pit is 16 m deep
-max_edge_vertical_angle: 75.0
+# Steepest roadmap edge (deg) when flying nose-first: the lidar's lowest and highest rays straight ahead
+max_edge_down_angle: 30.5 # lidar_fov_down + lidar_pitch (7 + 23.5)
+max_edge_up_angle: 28.5 # lidar_fov_up - lidar_pitch (52 - 23.5)
+static_environment: true # also a toggle on the dashboard. true = nothing moves: any slope, if the whole edge is known free. false = slopes within what the lidar sees ahead
 
 # Graph Connectivity
 nearest_neighbor_number: 8          # Down from 15

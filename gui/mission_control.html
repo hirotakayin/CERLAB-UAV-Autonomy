@@ -8,83 +8,180 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <style>
+  /* CMU brand colours (brand.cmu.edu/visual-identity/colors). Height ramp on the voxels stays viridis */
   :root {
-    --bg: #12151a; --panel: #1b2027; --line: #2d343e; --text: #e7eaee; --quiet: #98a2af;
-    --accent: #3d9df6; --good: #3fbf7f; --warn: #e5a93b; --danger: #e5534b;
+    --red: #C41230; --black: #000000; --iron: #6D6E71; --steel: #E0E0E0; --white: #FFFFFF;
+    --green: #009647; --skibo: #941120; --blue: #007BC0; --rose: #EF3A47; --gold: #FDB515;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+  html, body { height: 100%; margin: 0; background: var(--black); color: var(--black);
     font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  #app { display: grid; grid-template-columns: 1fr 340px; height: 100%; }
+  #app { display: grid; grid-template-columns: 1fr 320px; height: 100%; }
+  #main { display: grid; grid-template-rows: 1fr 280px; min-width: 0; min-height: 0; }
   #view { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+  #main.noBottom { grid-template-rows: 1fr; }
+  #main.noBottom #bottom { display: none; }
+  #legend.hidden { display: none; }
+  body.clean #app { grid-template-columns: 1fr; }
+  body.clean #side, body.clean #layers, body.clean #viewButtons, body.clean #legend, body.clean #fovNote, body.clean #banner { display: none !important; }
+  #hud { left: 12px; top: 12px; font-size: 15px; display: none; font-variant-numeric: tabular-nums; }
+  body.clean #hud { display: block; }
   #view canvas { display: block; }
   #view.picking canvas { cursor: crosshair; }
-  #side { background: var(--panel); border-left: 1px solid var(--line); padding: 16px;
+  #side { background: var(--white); border-top: 6px solid var(--red); padding: 16px;
     display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-  #conn { font-size: 13px; color: var(--quiet); display: flex; align-items: center; gap: 8px; }
-  #conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); }
-  #conn.on i { background: var(--good); }
+  #conn { font-size: 13px; color: var(--iron); display: flex; align-items: center; gap: 8px; }
+  #conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+  #conn.on i { background: var(--green); }
   #state { font-size: 26px; font-weight: 650; letter-spacing: .01em; }
-  #sub { color: var(--quiet); font-size: 13px; min-height: 18px; }
-  .bar { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; }
-  .bar div { height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+  #sub { color: var(--iron); font-size: 13px; min-height: 18px; }
+  .bar { height: 10px; background: var(--steel); overflow: hidden; }
+  .bar div { height: 100%; width: 0; background: var(--red); transition: width .4s; }
   .row { display: flex; justify-content: space-between; align-items: baseline; }
   #pct { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .pct2 { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .stats div { background: var(--bg); border-radius: 8px; padding: 8px; }
+  .stats div { border: 1px solid var(--steel); padding: 8px; }
   .stats b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
-  .stats span, .label { font-size: 12px; color: var(--quiet); }
+  .stats span, .label { font-size: 12px; color: var(--iron); }
+  .speedChoices { display: flex; gap: 14px; margin-top: 4px; }
+  .speedChoices label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  button { font: inherit; font-weight: 600; color: var(--text); background: #2a313b; border: 1px solid var(--line);
-    border-radius: 8px; padding: 12px 8px; cursor: pointer; }
-  button:hover:not(:disabled) { background: #343c48; }
-  button:disabled { opacity: .35; cursor: not-allowed; }
+  button { font: inherit; font-weight: 600; color: var(--black); background: var(--white); border: 1px solid var(--iron);
+    padding: 12px 8px; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--steel); }
+  button:disabled { color: var(--iron); border-color: var(--steel); background: var(--white); opacity: .6; cursor: not-allowed; }
   button.wide { grid-column: 1 / -1; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #06131f; }
-  button.danger { color: #ffb4af; border-color: #6b3531; }
-  button.active { outline: 2px solid var(--warn); }
-  #log { flex: 1; min-height: 110px; background: var(--bg); border-radius: 8px; padding: 8px; overflow-y: auto; font-size: 13px; }
-  #log div { padding: 2px 0; }
-  #log time { color: var(--quiet); margin-right: 6px; font-variant-numeric: tabular-nums; }
-  .overlay { position: absolute; background: rgba(18,21,26,.86); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  button.primary { background: var(--red); border-color: var(--red); color: var(--white); }
+  button.primary:hover:not(:disabled) { background: var(--skibo); }
+  button.primary:disabled { background: var(--steel); border-color: var(--steel); color: var(--iron); }
+  button.danger { color: var(--red); border-color: var(--red); }
+  button.danger:disabled { color: var(--iron); border-color: var(--steel); }
+  button.active { outline: 2px solid var(--red); outline-offset: 1px; }
+  #bottom { display: grid; grid-template-rows: auto 1fr; min-height: 0; min-width: 0; background: var(--black); border-top: 1px solid var(--iron); }
+  #tabs { display: flex; gap: 2px; background: var(--black); }
+  #tabs button { padding: 4px 12px; font-size: 12px; background: var(--black); color: var(--steel); border: 0; }
+  #tabs button:hover:not(:disabled) { background: var(--iron); }
+  #tabs button[aria-selected="true"] { background: var(--red); color: var(--white); }
+  #planView { display: none; background: var(--white); min-height: 0; overflow: hidden; grid-template-columns: 300px 1fr; }
+  #planLeft { padding: 8px 10px; border-right: 1px solid var(--steel); overflow-y: auto; }
+  #planStats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 6px; }
+  #planStats div { border: 1px solid var(--steel); padding: 4px 6px; }
+  #planStats b { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
+  #planStats span { font-size: 11px; color: var(--iron); }
+  #scoreChart { display: block; width: 100%; height: 76px; }
+  #planTableWrap { overflow: auto; min-height: 0; }
+  #planTable { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  #planTable th { position: sticky; top: 0; background: var(--white); text-align: right; color: var(--iron); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--iron); white-space: nowrap; }
+  #planTable td { text-align: right; padding: 2px 8px; border-bottom: 1px solid var(--steel); white-space: nowrap; }
+  #planTable .flag { color: var(--red); font-weight: 700; }
+  #terminal { background: var(--black); color: var(--steel); min-height: 0; padding: 6px 10px; overflow: auto;
+    font: 12px/1.45 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; white-space: pre; }
+  #terminal .c31 { color: var(--rose); } #terminal .c32 { color: #3ecf82; } #terminal .c33 { color: var(--gold); }
+  #terminal .c36 { color: var(--white); font-weight: 700; }
+  #terminal .other { color: #A9AAAD; }
+  .overlay { position: absolute; background: rgba(0,0,0,.85); color: var(--white); border: 1px solid var(--iron); padding: 8px 12px; font-size: 13px; }
   #legend { left: 12px; bottom: 12px; }
-  #legend .ramp { width: 150px; height: 10px; border-radius: 3px; margin: 4px 0;
+  #legend .label { color: var(--steel); }
+  #legend .ramp { width: 150px; height: 10px; margin: 4px 0;
     background: linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725); }
-  #legend .ends { display: flex; justify-content: space-between; color: var(--quiet); font-size: 12px; }
-  #legend p { margin: 6px 0 0; color: var(--quiet); }
+  #legend .ends { display: flex; justify-content: space-between; color: var(--steel); font-size: 12px; }
+  #legend p { margin: 6px 0 0; color: var(--steel); }
+  #legend b { font-weight: 600; }
   #hint { left: 50%; top: 12px; transform: translateX(-50%); display: none; }
   #confirm { left: 50%; top: 12px; transform: translateX(-50%); display: none; text-align: center; }
   #confirm button { padding: 8px 16px; margin: 8px 4px 0; }
-  #resetView { right: 12px; top: 12px; padding: 6px 10px; font-size: 13px; position: absolute; }
-  #banner { right: 12px; bottom: 12px; max-width: 420px; display: none; border-color: var(--danger); }
+  #viewButtons { position: absolute; right: 12px; top: 12px; display: flex; gap: 8px; }
+  #viewButtons button { padding: 6px 10px; font-size: 13px; }
+  #viewButtons button[aria-pressed="true"] { background: var(--red); border-color: var(--red); color: var(--white); }
+  #layers { left: 12px; top: 12px; padding: 8px 10px; }
+  #layers .label { color: var(--steel); display: block; margin-bottom: 4px; }
+  #layers label { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; cursor: pointer; }
+  #layers i { width: 10px; height: 10px; display: inline-block; }
+  .modeOption { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+  .modeOption input { margin-top: 3px; accent-color: var(--red); }
+  .modeOption small { display: block; color: var(--iron); font-size: 12px; }
+  #tourOption { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+  #tourOption input { margin-top: 3px; accent-color: var(--red); }
+  #tourOption small { display: block; color: var(--iron); font-size: 12px; }
+  #fovNote { right: 12px; top: 54px; display: none; max-width: 300px; }
+  #banner { right: 12px; bottom: 12px; max-width: 420px; display: none; border-color: var(--red); }
   #toast { left: 50%; bottom: 16px; transform: translateX(-50%); display: none; }
-  code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+  #zPanel canvas { display: block; width: 100%; height: 170px; cursor: crosshair; }
+  #zHead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  #zHead b { font-size: 14px; }
+  #logCsv { padding: 2px 8px; font-size: 12px; font-weight: 500; }
+  #zLegend { display: none; gap: 12px; font-size: 12px; color: var(--iron); margin-top: 4px; }
+  #zLegend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 4px; }
+  #zStats { margin-top: 8px; }
+  #runs { font-size: 12px; color: var(--iron); }
+  #runs div { padding: 2px 0; font-variant-numeric: tabular-nums; }
+  code { background: var(--iron); padding: 1px 4px; }
   @media (max-width: 800px) {
-    #app { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
+    #app { grid-template-columns: 1fr; height: auto; }
     html, body { height: auto; }
-    #view { height: 55vh; }
-    #side { border-left: 0; }
+    #main { grid-template-rows: 55vh 280px; }
   }
 </style>
 </head>
 <body>
 <div id="app">
-  <div id="view">
-    <button id="resetView">Reset view</button>
-    <div id="legend" class="overlay">
-      <div class="label">Mapped surfaces, by height</div>
-      <div class="ramp"></div>
-      <div class="ends"><span id="legLo">deep</span><span id="legHi">high</span></div>
-      <p>Green: drone. White: trail. Blue: planned path. Yellow box: progress region.</p>
+  <div id="main">
+    <div id="view">
+      <div id="viewButtons">
+        <button id="recordBtn" aria-pressed="false" title="Record the 3D view from the current camera until 5 s after landing. Keep this tab open and the window not minimised; other windows may cover it">&#9679; Record</button>
+        <button id="saveVoxels" hidden title="Save the last recording's voxel video again">&#8681; Voxels video</button>
+        <button id="savePaths" hidden title="Save the last recording's paths-only video again">&#8681; Paths video</button>
+        <button id="toggleLegend" aria-pressed="true">Height legend</button>
+        <button id="toggleBottom" aria-pressed="true">Log panel</button>
+        <button id="toggleFov" aria-pressed="false">Lidar FOV</button>
+        <button id="resetView">Reset view</button>
+      </div>
+      <div id="fovNote" class="overlay"></div>
+      <div id="layers" class="overlay"><span class="label">Planner layers</span><label><input type="checkbox" id="hideVoxels">Hide all voxels</label></div>
+      <div id="legend" class="overlay">
+        <div class="label">Mapped surfaces, by height</div>
+        <div class="ramp"></div>
+        <div class="ends"><span id="legLo">deep</span><span id="legHi">high</span></div>
+        <p>Voxel size: <b id="legVoxel">&mdash;</b>. Red: drone. White: trail. Blue: planned path. Gray box: progress region. Gold ring: home.</p>
+      </div>
+      <div id="hint" class="overlay">Click a mapped surface to inspect. <b>Esc</b> to cancel.</div>
+      <div id="confirm" class="overlay">
+        <div id="confirmText"></div>
+        <button id="confirmGo" class="primary">Go</button>
+        <button id="confirmCancel">Cancel</button>
+      </div>
+      <div id="banner" class="overlay">Not connected to the robot. Is <code>rosbridge</code> running? Retrying&hellip;</div>
+      <div id="toast" class="overlay"></div>
+      <div id="hud" class="overlay"></div>
     </div>
-    <div id="hint" class="overlay">Click a mapped surface to inspect. <b>Esc</b> to cancel.</div>
-    <div id="confirm" class="overlay">
-      <div id="confirmText"></div>
-      <button id="confirmGo" class="primary">Go</button>
-      <button id="confirmCancel">Cancel</button>
+    <div id="bottom">
+      <div id="tabs">
+        <button id="tabTerminal" aria-selected="true">Terminal</button>
+        <button id="tabPlans" aria-selected="false">Waypoints</button>
+      </div>
+      <div id="terminal" aria-label="Terminal log"></div>
+      <div id="planView">
+        <div id="planLeft">
+          <div id="planStats">
+            <div><b id="psCount">&mdash;</b><span>Waypoints</span></div>
+            <div><b id="psHop">&mdash;</b><span>Median hop (m)</span></div>
+            <div><b id="psSharp">&mdash;</b><span>Turns over 90&deg;</span></div>
+            <div><b id="psRevisit">&mdash;</b><span>Goals revisited</span></div>
+            <div><b id="psLearned">&mdash;</b><span>Median learned / predicted</span></div>
+            <div><b id="psScore">&mdash;</b><span>Latest score</span></div>
+          </div>
+          <div class="label">Score of each chosen waypoint</div>
+          <canvas id="scoreChart" aria-label="Score of each chosen waypoint"></canvas>
+        </div>
+        <div id="planTableWrap">
+          <table id="planTable">
+            <thead><tr><th>Type</th><th>#</th><th>Time</th><th>Goal x, y, z</th><th>&Delta;x</th><th>&Delta;y</th><th>&Delta;z</th><th>Dist</th><th>Path</th><th>Turn&deg;</th><th>Score</th><th>Predicted</th><th>Learned</th><th>Revisit</th><th>Choices</th><th>Reachable</th></tr></thead>
+            <tbody id="planRows"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <div id="banner" class="overlay">Not connected to the robot. Is <code>rosbridge</code> running? Retrying&hellip;</div>
-    <div id="toast" class="overlay"></div>
   </div>
   <div id="side">
     <div id="conn"><i></i><span id="connText">Connecting&hellip;</span></div>
@@ -93,9 +190,24 @@
       <div id="sub"></div>
     </div>
     <div>
-      <div class="row"><span class="label">Pit explored</span><span id="pct">0%</span></div>
+      <div class="row"><span class="label" id="pctLabel">Pit explored (0.6 m blocks)</span><span id="pct">0%</span></div>
       <div class="bar"><div id="pctBar"></div></div>
     </div>
+    <div>
+      <div class="row"><span class="label" id="floorLabel">Floor covered</span><span id="floorPct" class="pct2">&mdash;</span></div>
+      <div class="bar"><div id="floorBar"></div></div>
+    </div>
+    <div>
+      <div class="row"><span class="label">Surfaces confirmed up close</span><span id="surfacePct" class="pct2">&mdash;</span></div>
+      <div class="bar"><div id="surfaceBar"></div></div>
+    </div>
+    <div>
+      <div class="row"><span class="label">Computer memory</span><span id="memPct" class="pct2">&mdash;</span></div>
+      <div class="bar"><div id="memBar"></div></div>
+      <div class="row"><span class="label" id="memDetail">&mdash;</span></div>
+      <div class="row"><span class="label" id="memTop"></span></div>
+    </div>
+    <div class="row"><span class="label">Config</span><span id="presetName">&mdash;</span></div>
     <div class="stats">
       <div><b id="elapsed">0:00</b><span>Elapsed</span></div>
       <div><b id="height">&mdash;</b><span>Height (m)</span></div>
@@ -108,8 +220,28 @@
       <button id="btnHome">Return home</button>
       <button id="btnLand" class="danger wide">Land here</button>
     </div>
-    <div class="label">Mission log</div>
-    <div id="log"></div>
+    <div id="simSpeed">
+      <div class="row"><span class="label">Sim speed</span><span id="speedActual">&mdash;</span></div>
+      <div class="speedChoices">
+        <label><input type="radio" name="speed" value="1" checked>1x</label>
+        <label><input type="radio" name="speed" value="2">2x</label>
+        <label><input type="radio" name="speed" value="4">4x</label>
+        <label><input type="radio" name="speed" value="8">8x</label>
+      </div>
+    </div>
+    <label id="staticOption" class="modeOption"><input type="checkbox" id="staticToggle"><span>Static environment<small>Nothing moves in the pit: flight paths may go straight up or down, through space that is fully mapped. Off: slopes stay within what the lidar sees ahead.</small></span></label>
+    <label id="tourOption"><input type="checkbox" id="tourToggle"><span>Tour<small>Plan an ordered route through every area left, instead of picking the best goal each time</small></span></label>
+    <div id="zPanel">
+      <div id="zHead"><b>Height over time</b><button id="logCsv">Download log</button></div>
+      <canvas id="zChart" aria-label="Drone height over time"></canvas>
+      <div id="zLegend"><span><i style="background:#C41230"></i>This run</span><span><i style="background:#6D6E71"></i>Previous run</span></div>
+      <div class="stats" id="zStats">
+        <div><b id="zLowest">&mdash;</b><span>Lowest z (m)</span></div>
+        <div><b id="zNow">&mdash;</b><span>Descent, last 10 s (m/s)</span></div>
+        <div><b id="zExplore">&mdash;</b><span>Descent while exploring (m/s)</span></div>
+      </div>
+    </div>
+    <div id="runs"></div>
   </div>
 </div>
 
@@ -125,9 +257,9 @@ const $ = id => document.getElementById(id);
 
 // ---------------------------------------------------------------- 3D view
 const view = $('view');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setClearColor(0x12151a);
+const renderer = new THREE.WebGLRenderer({ antialias: false }); // tens of thousands of voxel boxes: favour frame rate
+renderer.setPixelRatio(1);
+renderer.setClearColor(0x000000);
 view.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -140,9 +272,11 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.6);
 sun.position.set(1, 2, 3);
 scene.add(sun);
 
+let pathsRenderer = null; // a second view with voxels hidden, drawn only while the Record button records
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h);
+  if (pathsRenderer) pathsRenderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -167,17 +301,22 @@ function rampColor(t, out) {
   out.setRGB((a[0] + (b[0] - a[0]) * f) / 255, (a[1] + (b[1] - a[1]) * f) / 255, (a[2] + (b[2] - a[2]) * f) / 255);
 }
 
+// Every voxel mesh sits in this group, so one switch clears the view of the flight path
+const voxelGroup = new THREE.Group();
+scene.add(voxelGroup);
+$('hideVoxels').onchange = e => { voxelGroup.visible = !e.target.checked; };
+
 let voxelMesh = null, voxelCapacity = 0, voxelSize = 0;
 const voxelMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff });
 function ensureVoxelMesh(count, size) {
   if (voxelMesh && count <= voxelCapacity && size === voxelSize) return;
-  if (voxelMesh) { scene.remove(voxelMesh); voxelMesh.geometry.dispose(); voxelMesh.dispose(); }
+  if (voxelMesh) { voxelGroup.remove(voxelMesh); voxelMesh.geometry.dispose(); voxelMesh.dispose(); }
   voxelCapacity = Math.max(1000, count * 2);
   voxelSize = size;
   voxelMesh = new THREE.InstancedMesh(new THREE.BoxBufferGeometry(size, size, size), voxelMaterial, voxelCapacity);
   voxelMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(voxelCapacity * 3), 3);
   voxelMesh.frustumCulled = false; // bounds change every update
-  scene.add(voxelMesh);
+  voxelGroup.add(voxelMesh);
 }
 
 function decodeCloud(msg) {
@@ -200,6 +339,7 @@ function decodeCloud(msg) {
 let mapRes = 0.2;
 const dummy = new THREE.Object3D(), color = new THREE.Color();
 function updateVoxels(msg) {
+  if (!voxelGroup.visible) return; // decoding blocks the page; the next message redraws within 3 s
   const pts = decodeCloud(msg), n = pts.length / 3;
   ensureVoxelMesh(n, mapRes);
   let lo = Infinity, hi = -Infinity;
@@ -220,14 +360,59 @@ function updateVoxels(msg) {
 
 // Drone: a sphere with a nose showing its heading
 const drone = new THREE.Group();
-const droneMaterial = new THREE.MeshBasicMaterial({ color: 0x3fbf7f });
+const droneMaterial = new THREE.MeshBasicMaterial({ color: 0xC41230 });
 drone.add(new THREE.Mesh(new THREE.SphereBufferGeometry(0.25, 16, 12), droneMaterial));
 const nose = new THREE.Mesh(new THREE.ConeBufferGeometry(0.14, 0.6, 12), droneMaterial);
 nose.rotation.z = -Math.PI / 2; // cone points along +x
 nose.position.x = 0.45;
 drone.add(nose);
+drone.scale.setScalar(1.0);
 drone.visible = false;
 scene.add(drone);
+
+// Lidar field of view: the band between the sensor's lower and upper elevation limits, in the tilted sensor
+// frame. Values come from the config (lidar_fov_*, lidar_pitch), the length is only a display length
+const FOV_LENGTH = 6.0;
+const fov = new THREE.Group();
+fov.visible = false;
+scene.add(fov);
+let fovInfo = { up: 52, down: -7, pitch: 23.5, range: 20 };
+function buildFov() {
+  fov.clear();
+  const tilted = new THREE.Group();
+  tilted.position.z = 0.13; // lidar height above base_link
+  tilted.rotation.y = fovInfo.pitch * Math.PI / 180; // positive pitch = nose-down, as in the URDF
+  fov.add(tilted);
+  const up = fovInfo.up * Math.PI / 180, down = fovInfo.down * Math.PI / 180;
+  const fill = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false });
+  const edge = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 });
+  const SEG = 64;
+  [up, down].forEach(e => {
+    const r = FOV_LENGTH * Math.cos(e), h = FOV_LENGTH * Math.sin(e);
+    const profile = [new THREE.Vector2(0.001, 0), new THREE.Vector2(r, h)];
+    const cone = new THREE.Mesh(new THREE.LatheBufferGeometry(profile, SEG), fill); // lathe spins around +y
+    cone.rotation.x = Math.PI / 2; // +y to +z
+    tilted.add(cone);
+    const rim = [];
+    for (let i = 0; i <= SEG; ++i) { const a = i / SEG * 2 * Math.PI; rim.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), h)); }
+    tilted.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(rim), edge));
+    for (let i = 0; i < 8; ++i) {
+      const a = i / 8 * 2 * Math.PI;
+      tilted.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), h)]), edge));
+    }
+  });
+  // the sensor's forward axis: shows the tilt against the level drone
+  tilted.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(FOV_LENGTH, 0, 0)]),
+                            new THREE.LineBasicMaterial({ color: 0xC41230 })));
+  $('fovNote').innerHTML = 'Band between ' + fovInfo.down + '&deg; and +' + fovInfo.up + '&deg; around the sensor, tilted ' + fovInfo.pitch +
+    '&deg; nose-down (red line: sensor forward). Drawn ' + FOV_LENGTH + ' m long; the map uses returns out to ' + fovInfo.range + ' m.';
+}
+buildFov();
+$('toggleFov').onclick = () => {
+  fov.visible = !fov.visible;
+  $('toggleFov').setAttribute('aria-pressed', fov.visible);
+  $('fovNote').style.display = fov.visible ? 'block' : 'none';
+};
 
 function makeLine(colorHex, capacity) {
   const geometry = new THREE.BufferGeometry();
@@ -241,13 +426,15 @@ function makeLine(colorHex, capacity) {
 const TRAIL_MAX = 20000;
 const trail = makeLine(0xffffff, TRAIL_MAX);
 let trailCount = 0, lastTrail = null;
-const plan = makeLine(0x3d9df6, 5000);
+const plan = makeLine(0x007BC0, 5000);
 
 function updatePose(msg) {
   const p = msg.pose.position, q = msg.pose.orientation;
   drone.position.set(p.x, p.y, p.z);
   drone.quaternion.set(q.x, q.y, q.z, q.w);
   drone.visible = true;
+  fov.position.copy(drone.position);
+  fov.quaternion.copy(drone.quaternion);
   if (trailCount < TRAIL_MAX && (!lastTrail || drone.position.distanceTo(lastTrail) > 0.1)) {
     trail.geometry.attributes.position.setXYZ(trailCount++, p.x, p.y, p.z);
     trail.geometry.attributes.position.needsUpdate = true;
@@ -264,6 +451,7 @@ function updatePlan(msg) {
 }
 
 let regionBox = null, homeMarker = null, inspectMarker = null, regionKey = '';
+let regionMin = new THREE.Vector3(), regionMax = new THREE.Vector3();
 function updateRegion(min, max) {
   const key = min.join() + max.join();
   if (key === regionKey || max[0] <= min[0]) return;
@@ -272,33 +460,77 @@ function updateRegion(min, max) {
   if (regionBox) scene.remove(regionBox);
   const size = new THREE.Vector3(max[0]-min[0], max[1]-min[1], max[2]-min[2]);
   regionCenter = new THREE.Vector3((max[0]+min[0])/2, (max[1]+min[1])/2, (max[2]+min[2])/2);
+  regionMin.set(min[0], min[1], min[2]);
+  regionMax.set(max[0], max[1], max[2]);
   regionSize = Math.max(size.x, size.y, size.z);
   regionBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxBufferGeometry(size.x, size.y, size.z)),
-                                     new THREE.LineBasicMaterial({ color: 0xe5a93b }));
+                                     new THREE.LineBasicMaterial({ color: 0xE0E0E0 }));
   regionBox.position.copy(regionCenter);
   scene.add(regionBox);
   if (first) resetView();
 }
+// Wireframe of the pit from the world model the launch file loads: walls, floor, columns and beams.
+// The ground around the pit is left out, it would only add lines outside the view
+function buildStructure(sdf) {
+  const material = new THREE.LineBasicMaterial({ color: 0x9AA0A6 });
+  new DOMParser().parseFromString(sdf, 'text/xml').querySelectorAll('collision').forEach(c => {
+    const size = c.querySelector('box > size');
+    if (!size || c.getAttribute('name').startsWith('top_ground')) return;
+    const s = size.textContent.trim().split(/\s+/).map(Number);
+    const p = c.querySelector('pose').textContent.trim().split(/\s+/).map(Number);
+    const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxBufferGeometry(s[0], s[1], s[2])), material);
+    box.position.set(p[0], p[1], p[2]);
+    scene.add(box);
+  });
+}
 function updateHome(h) {
   if (!homeMarker) {
-    homeMarker = new THREE.Mesh(new THREE.TorusBufferGeometry(0.4, 0.05, 8, 32), new THREE.MeshBasicMaterial({ color: 0x3fbf7f }));
+    homeMarker = new THREE.Mesh(new THREE.TorusBufferGeometry(0.4, 0.05, 8, 32), new THREE.MeshBasicMaterial({ color: 0xFDB515 }));
     scene.add(homeMarker);
   }
   homeMarker.position.set(h[0], h[1], h[2]);
 }
 function showInspectMarker(p) {
   if (!inspectMarker) {
-    inspectMarker = new THREE.Mesh(new THREE.SphereBufferGeometry(0.2, 16, 12), new THREE.MeshBasicMaterial({ color: 0xe5a93b }));
+    inspectMarker = new THREE.Mesh(new THREE.SphereBufferGeometry(0.2, 16, 12), new THREE.MeshBasicMaterial({ color: 0xFDB515 }));
     scene.add(inspectMarker);
   }
   inspectMarker.position.copy(p);
   inspectMarker.visible = true;
 }
 
+// ---------------------------------------------------------------- views for recordings, set from the page address
+// cam=overview: the whole pit from above at an angle, fixed, for recordings and GIFs; cam=orbit: the same, slowly circling
+// cut=<m>: hide voxels more than this far above the drone, so slabs, beams and cave roofs never cover it
+const CAM = query.get('cam') || '';
+const CUT = query.has('cut') ? Number(query.get('cut')) : null;
+const cutPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+if (CUT !== null) {
+  renderer.localClippingEnabled = true;
+  voxelMaterial.clippingPlanes = [cutPlane];
+}
+let camAngle = -2.27, lastFrame = performance.now();
+function steerCamera(dt) {
+  if (CAM !== 'overview' && CAM !== 'orbit') return;
+  if (CAM === 'orbit') camAngle += dt * 0.08; // rad/s
+  camera.position.copy(regionCenter).add(new THREE.Vector3(Math.cos(camAngle) * 0.9, Math.sin(camAngle) * 0.9, 1.1).multiplyScalar(regionSize));
+  controls.target.copy(regionCenter);
+}
+
 (function animate() {
   requestAnimationFrame(animate);
+  const now = performance.now(), dt = Math.min(0.1, (now - lastFrame) / 1000);
+  lastFrame = now;
+  steerCamera(dt);
+  if (CUT !== null) cutPlane.constant = (drone.visible ? drone.position.z : 1e3) + CUT;
   controls.update();
   renderer.render(scene, camera);
+  if (pathsRenderer) { // the paths-only recording: the same camera, voxels hidden for this draw
+    const shown = voxelGroup.visible;
+    voxelGroup.visible = false;
+    pathsRenderer.render(scene, camera);
+    voxelGroup.visible = shown;
+  }
 })();
 
 // ---------------------------------------------------------------- ROS link
@@ -311,7 +543,26 @@ function setConnected(on) {
   $('banner').style.display = on ? 'none' : 'block';
   applyState();
 }
-ros.on('connection', () => setConnected(true));
+let everConnected = false;
+ros.on('connection', () => {
+  if (everConnected) { location.reload(); return; } // the sim restarted: subscriptions and the map start over
+  everConnected = true;
+  setConnected(true);
+  applyAddressView();
+  const param = (name, key) => new ROSLIB.Param({ ros, name }).get(v => {
+    if (typeof v === 'number') { fovInfo[key] = v; buildFov(); }
+  });
+  param('/DEP/lidar_fov_up', 'up');
+  param('/DEP/lidar_fov_down', 'down');
+  param('/DEP/lidar_pitch', 'pitch');
+  param('/dynamic_map/raycast_max_length', 'range');
+  physicsCall('get_physics_properties', 'GetPhysicsProperties', {}, p => { // a reloaded page shows the speed already set
+    const input = document.querySelector('input[name="speed"][value="' + Math.round(p.max_update_rate * p.time_step) + '"]');
+    if (input) input.checked = true;
+  }, () => {});
+  new ROSLIB.Param({ ros, name: '/autonomous_flight/world_sdf' }).get(v => { if (typeof v === 'string') buildStructure(v); });
+  new ROSLIB.Param({ ros, name: '/autonomous_flight/map_name' }).get(v => { if (typeof v === 'string') mapName = v; });
+});
 ros.on('error', () => {});
 ros.on('close', () => { setConnected(false); setTimeout(() => ros.connect(WS_URL), 2000); });
 ros.connect(WS_URL);
@@ -319,16 +570,229 @@ ros.connect(WS_URL);
 function subscribe(name, type, throttle, cb) {
   new ROSLIB.Topic({ ros, name, messageType: type, throttle_rate: throttle, queue_length: 1 }).subscribe(cb);
 }
-subscribe(MAP_TOPIC, 'sensor_msgs/PointCloud2', 1000, updateVoxels);
+subscribe(MAP_TOPIC, 'sensor_msgs/PointCloud2', 3000, updateVoxels); // the whole map every time: decoding it blocks the page
 subscribe(POSE_TOPIC, 'geometry_msgs/PoseStamped', 100, updatePose);
 subscribe(PATH_TOPIC, 'nav_msgs/Path', 500, updatePlan);
 subscribe('/exploration/status', 'std_msgs/String', 0, m => updateStatus(JSON.parse(m.data)));
+subscribe('/exploration/terminal', 'std_msgs/String', 0, m => appendTerminal(m.data));
+subscribe('/exploration/plan_log', 'std_msgs/String', 0, m => updatePlans(JSON.parse(m.data)));
+subscribe('/exploration/system', 'std_msgs/String', 0, m => updateSystem(JSON.parse(m.data)));
+// Sim speed: Gazebo's update rate cap sets the requested speed, /clock against the wall clock shows what it reaches
+const speedSamples = [];
+subscribe('/clock', 'rosgraph_msgs/Clock', 1000, m => {
+  speedSamples.push([performance.now() / 1000, m.clock.secs + m.clock.nsecs * 1e-9]);
+  if (speedSamples.length > 6) speedSamples.shift();
+  if (speedSamples.length < 2) return;
+  const first = speedSamples[0], last = speedSamples[speedSamples.length - 1];
+  if (last[0] > first[0]) $('speedActual').textContent = 'actual ' + ((last[1] - first[1]) / (last[0] - first[0])).toFixed(1) + 'x';
+});
+function physicsCall(name, type, request, done, failed) {
+  new ROSLIB.Service({ ros, name: '/gazebo/' + name, serviceType: 'gazebo_msgs/' + type }).callService(request, done, failed);
+}
+function setSimSpeed(speed) {
+  const failed = err => toast('Could not set sim speed: ' + err);
+  physicsCall('get_physics_properties', 'GetPhysicsProperties', {}, p => {
+    const request = { time_step: p.time_step, max_update_rate: speed / p.time_step, gravity: p.gravity, ode_config: p.ode_config };
+    physicsCall('set_physics_properties', 'SetPhysicsProperties', request, res => {
+      toast(res.success ? 'Sim speed limit ' + speed + 'x' : 'Could not set sim speed: ' + res.status_message);
+    }, failed);
+  }, failed);
+}
+document.querySelectorAll('input[name="speed"]').forEach(input => { input.onchange = () => setSimSpeed(Number(input.value)); });
+subscribe('/rosout_agg', 'rosgraph_msgs/Log', 0, m => {
+  if (m.name === '/dynamic_exploration_node') return; // already in its terminal output
+  const code = m.level >= 8 ? 31 : m.level === 4 ? 33 : null;
+  addTerminalLine('[' + m.name + '] ' + m.msg, code ? 'c' + code : 'other');
+});
 
 const inspectTopic = new ROSLIB.Topic({ ros, name: '/exploration/inspect', messageType: 'geometry_msgs/PointStamped' });
 
 function callCommand(name) {
   new ROSLIB.Service({ ros, name: '/exploration/' + name, serviceType: 'std_srvs/Trigger' })
     .callService({}, res => toast(res.message), err => toast('Command failed: ' + err));
+}
+
+// ---------------------------------------------------------------- planner layers (the DEP markers RViz shows)
+const LAYERS = [
+  { id: 'nodes', label: 'Roadmap nodes', topic: '/dep/roadmap', ns: ['prm_point'], kind: 'points', color: 0xFFFFFF, size: 0.12 },
+  { id: 'edges', label: 'Roadmap edges', topic: '/dep/roadmap', ns: ['edge'], kind: 'lines', color: 0x6D6E71 },
+  { id: 'gains', label: 'Node gain labels', topic: '/dep/roadmap', ns: ['num_voxel_text'], kind: 'text', color: 0xFFFFFF },
+  { id: 'goals', label: 'Goal candidates', topic: '/dep/roadmap', ns: ['goal_candidate'], kind: 'points', color: 0xFDB515, size: 0.3 },
+  { id: 'candidates', label: 'Candidate A* paths', topic: '/dep/candidate_paths', ns: ['candidate_path', 'candidate_path_node'], kind: 'mixed', color: 0x007BC0, size: 0.18 },
+  { id: 'best', label: 'Chosen path', topic: '/dep/best_paths', ns: ['best_path', 'best_path_node'], kind: 'mixed', color: 0xEF3A47, size: 0.25 },
+  { id: 'tour', label: 'Tour order', topic: '/dep/tour', ns: ['tour', 'tour_stop'], kind: 'mixed', color: 0xE87722, size: 0.3 },
+  { id: 'frontiers', label: 'Frontiers', topic: '/dep/frontier_regions', ns: ['frontier range'], kind: 'points', color: 0x009647, size: 0.3 },
+];
+const layerState = {}, topicLinks = {}, latestMarkers = {};
+let planCount = 0; // text labels cost a canvas and texture each, so they are redrawn only for a new plan
+LAYERS.forEach(layer => {
+  const group = new THREE.Group();
+  group.visible = false;
+  scene.add(group);
+  layerState[layer.id] = { on: false, group };
+  const row = document.createElement('label');
+  row.innerHTML = '<input type="checkbox"><i style="background:#' + layer.color.toString(16).padStart(6, '0') + '"></i>' + layer.label;
+  row.querySelector('input').onchange = e => setLayer(layer, e.target.checked);
+  row.querySelector('input').dataset.layer = layer.id;
+  $('layers').appendChild(row);
+});
+function setLayer(layer, on) {
+  layerState[layer.id].on = on;
+  layerState[layer.id].group.visible = on;
+  // subscribe only while a layer needs the topic: roadmap messages are large
+  const wanted = LAYERS.some(l => l.topic === layer.topic && layerState[l.id].on);
+  if (wanted && !topicLinks[layer.topic]) {
+    topicLinks[layer.topic] = new ROSLIB.Topic({ ros, name: layer.topic, messageType: 'visualization_msgs/MarkerArray', throttle_rate: 1000, queue_length: 1 });
+    topicLinks[layer.topic].subscribe(m => { latestMarkers[layer.topic] = m.markers; drawTopicLayers(layer.topic); });
+  }
+  else if (!wanted && topicLinks[layer.topic]) {
+    topicLinks[layer.topic].unsubscribe();
+    delete topicLinks[layer.topic];
+  }
+  if (on) drawTopicLayers(layer.topic);
+}
+function clearGroup(group) {
+  while (group.children.length) {
+    const c = group.children.pop();
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) { if (c.material.map) c.material.map.dispose(); c.material.dispose(); }
+  }
+}
+function textSprite(text) {
+  const cv = document.createElement('canvas');
+  cv.width = 96; cv.height = 32;
+  const c = cv.getContext('2d');
+  c.font = '22px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.lineWidth = 4; c.strokeStyle = '#000'; c.strokeText(text, 48, 16);
+  c.fillStyle = '#fff'; c.fillText(text, 48, 16);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
+  sprite.scale.set(0.9, 0.3, 1);
+  return sprite;
+}
+function drawTopicLayers(topic) {
+  const markers = latestMarkers[topic];
+  if (!markers) return;
+  LAYERS.filter(l => l.topic === topic && layerState[l.id].on).forEach(layer => {
+    const group = layerState[layer.id].group;
+    if (layer.kind === 'text') {
+      if (group.children.length && layerState[layer.id].drawnPlans === planCount) return;
+      layerState[layer.id].drawnPlans = planCount;
+    }
+    clearGroup(group);
+    const pts = [], segs = [];
+    markers.forEach(m => {
+      if (!layer.ns.includes(m.ns)) return;
+      const p = m.pose.position;
+      if (m.type === 9) { // TEXT_VIEW_FACING
+        const s = textSprite(m.text);
+        s.position.set(p.x, p.y, p.z + 0.2);
+        group.add(s);
+      }
+      else if (m.type === 5) { m.points.forEach(q => segs.push(q.x, q.y, q.z)); } // LINE_LIST
+      else pts.push(p.x, p.y, p.z);
+    });
+    if (segs.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
+      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: layer.color }));
+      lines.frustumCulled = false;
+      group.add(lines);
+    }
+    if (pts.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      const points = new THREE.Points(g, new THREE.PointsMaterial({ color: layer.color, size: layer.size, sizeAttenuation: true }));
+      points.frustumCulled = false;
+      group.add(points);
+    }
+  });
+}
+
+// Cloud layers published by the mission node, one cube per point
+function addCloudLayer(label, topic, colorHex, opacity, blockVoxels, flat) {
+  let mesh = null, capacity = 0, link = null;
+  const material = new THREE.MeshBasicMaterial({ color: colorHex, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
+  if (CUT !== null) material.clippingPlanes = [cutPlane];
+  const update = msg => {
+    if (!voxelGroup.visible) return;
+    const pts = decodeCloud(msg), n = pts.length / 3;
+    if (!mesh || n > capacity) {
+      if (mesh) { voxelGroup.remove(mesh); mesh.geometry.dispose(); mesh.dispose(); }
+      capacity = Math.max(2000, n * 2);
+      const size = blockVoxels * mapRes;
+      mesh = new THREE.InstancedMesh(new THREE.BoxBufferGeometry(size, size, flat ? 0.04 : size), material, capacity);
+      mesh.frustumCulled = false;
+      voxelGroup.add(mesh);
+    }
+    for (let i = 0; i < n; ++i) {
+      dummy.position.set(pts[i*3], pts[i*3+1], pts[i*3+2]);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.count = n;
+    mesh.visible = true;
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  const row = document.createElement('label');
+  row.innerHTML = '<input type="checkbox"><i style="background:#' + colorHex.toString(16).padStart(6, '0') + '"></i>' + label;
+  row.querySelector('input').onchange = e => {
+    if (e.target.checked) {
+      link = new ROSLIB.Topic({ ros, name: topic, messageType: 'sensor_msgs/PointCloud2', throttle_rate: 1000, queue_length: 1 });
+      link.subscribe(update);
+    }
+    else {
+      if (link) link.unsubscribe();
+      link = null;
+      if (mesh) mesh.visible = false;
+    }
+  };
+  $('layers').appendChild(row);
+}
+addCloudLayer('Unexplored (0.6 m blocks)', '/exploration/unknown_voxels', 0xEF3A47, 0.35, 3, false);
+addCloudLayer('Floor seen so far', '/exploration/floor_seen', 0x008F91, 1, 1, true);
+
+// ---------------------------------------------------------------- tour option
+let staticBusy = false;
+$('staticToggle').onchange = e => {
+  staticBusy = true;
+  new ROSLIB.Service({ ros, name: '/exploration/static', serviceType: 'std_srvs/SetBool' }).callService({ data: e.target.checked }, res => {
+    staticBusy = false;
+    toast(res.message);
+  }, err => {
+    staticBusy = false;
+    toast('Command failed: ' + err);
+  });
+};
+let tourBusy = false;
+$('tourToggle').onchange = e => {
+  tourBusy = true;
+  new ROSLIB.Service({ ros, name: '/exploration/tour', serviceType: 'std_srvs/SetBool' }).callService({ data: e.target.checked }, res => {
+    tourBusy = false;
+    toast(res.message);
+  }, err => {
+    tourBusy = false;
+    toast('Command failed: ' + err);
+  });
+};
+
+// ---------------------------------------------------------------- terminal log
+const terminal = $('terminal');
+const TERMINAL_MAX = 3000;
+function addTerminalLine(text, cls) {
+  const follow = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 40; // scrolled up: leave it there
+  const line = document.createElement('div');
+  line.textContent = text;
+  if (cls) line.className = cls;
+  terminal.appendChild(line);
+  while (terminal.childElementCount > TERMINAL_MAX) terminal.firstChild.remove();
+  if (follow) terminal.scrollTop = terminal.scrollHeight;
+}
+function appendTerminal(data) {
+  data.split('\n').forEach(raw => {
+    if (!raw) return;
+    const colour = /\x1b\[(?:\d+;)?(\d+)m/.exec(raw);
+    addTerminalLine(raw.replace(/\x1b\[[0-9;]*m/g, ''), colour && colour[1] !== '0' ? 'c' + colour[1] : null);
+  });
 }
 
 // ---------------------------------------------------------------- status and buttons
@@ -341,37 +805,154 @@ const STATE_TEXT = {
   INSPECTING: ['Inspecting', 'Flying to the selected spot, then back to exploring'],
   RETURNING: ['Returning home', 'Will land at the takeoff spot'],
   LANDING: ['Landing', ''],
-  LANDED: ['Landed', 'Mission over. Restart the sim for a new run'],
+  LANDED: ['Landed', 'Press Start again to fly from here. The map is kept'],
 };
 const FLYING = ['ENTRY', 'EXPLORING', 'INSPECTING', 'RETURNING', 'PAUSED'];
 let status = null;
 
+function applyAddressView() {
+  if (query.get('clean') === '1') { document.body.classList.add('clean'); $('main').classList.add('noBottom'); resize(); }
+  if (query.get('voxels') === '0') { $('hideVoxels').checked = true; voxelGroup.visible = false; }
+  (query.get('layers') || '').split(',').filter(Boolean).forEach(id => {
+    const box = document.querySelector('input[data-layer="' + id + '"]');
+    const layer = LAYERS.find(l => l.id === id);
+    if (box && layer) { box.checked = true; setLayer(layer, true); }
+  });
+  if (query.get('record')) startRecording(query.get('record'), true);
+}
+
+// Recording the 3D view. The Record button records two videos of the same run from the current camera: the view with
+// voxels, and the same view with voxels hidden (paths only), saved to the browser's downloads folder. record=<name> in the
+// address instead sends one video of the view to the record_dashboard.py server that served this page
+let recorders = [], recordStart = 0, landedAt = null, mapName = '';
+// <pit>_<planner>, e.g. excavation1_gain_static or excavation_slab_epic_1ms: runs on other pits already carry the pit name
+function runName() {
+  const preset = status && status.preset ? status.preset : 'run';
+  const pit = mapName || 'unknown_pit';
+  return preset.startsWith(pit + '_') ? preset : pit + '_' + preset;
+}
+function recordCanvas(canvas, id, upload, onSaved) {
+  const stream = canvas.captureStream(25);
+  const types = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm'];
+  const type = types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8000000 });
+  const pieces = [];
+  let chain = Promise.resolve();
+  const send = (body, done) => { chain = chain.then(() => fetch('/chunk?id=' + encodeURIComponent(id) + (done ? '&done=1' : ''), { method: 'POST', body }).catch(() => {})); };
+  rec.ondataavailable = e => { if (!e.data.size) return; if (upload) send(e.data, false); else pieces.push(e.data); };
+  rec.onstop = () => {
+    if (upload) { send(new Blob(), true); return; }
+    const file = { url: URL.createObjectURL(new Blob(pieces, { type: type.split(';')[0] || 'video/webm' })), name: id + (type.startsWith('video/mp4') ? '.mp4' : '.webm') };
+    saveFile(file);
+    onSaved(file);
+  };
+  rec.start(2000);
+  return rec;
+}
+// Chromium holds back a page's second automatic download until you allow it, so each video also gets its own save button
+const lastVideos = {};
+function saveFile(file) {
+  const link = document.createElement('a');
+  link.href = file.url;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+function offerSave(kind, file) {
+  if (lastVideos[kind]) URL.revokeObjectURL(lastVideos[kind].url);
+  lastVideos[kind] = file;
+  const button = $(kind === 'voxels' ? 'saveVoxels' : 'savePaths');
+  button.hidden = false;
+  button.onclick = () => saveFile(file);
+}
+function startRecording(name, upload) {
+  if (recorders.length) return;
+  if (!window.MediaRecorder) { toast('This browser cannot record video'); return; }
+  if (upload) { recorders = [recordCanvas(renderer.domElement, runName() + '_' + name + '_' + Date.now(), true, () => {})]; return; }
+  // the voxel video needs the voxels drawn, and the paths video a second view drawn each frame with them hidden
+  $('hideVoxels').checked = false;
+  voxelGroup.visible = true;
+  pathsRenderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+  pathsRenderer.setPixelRatio(1);
+  pathsRenderer.setClearColor(0x000000);
+  pathsRenderer.localClippingEnabled = renderer.localClippingEnabled;
+  pathsRenderer.setSize(view.clientWidth, view.clientHeight);
+  const d = new Date(), two = n => String(n).padStart(2, '0');
+  const stamp = d.getFullYear() + two(d.getMonth() + 1) + two(d.getDate()) + '_' + two(d.getHours()) + two(d.getMinutes()) + two(d.getSeconds());
+  const base = runName() + '_' + stamp;
+  const saved = [];
+  const onSaved = file => {
+    offerSave(file.name.includes('_paths.') ? 'paths' : 'voxels', file);
+    saved.push(file.name);
+    if (saved.length === 2) toast('Saved ' + saved.join(' and ') + ' to your downloads. If one is missing, allow multiple downloads for this page, or use the save buttons');
+  };
+  recorders = [recordCanvas(renderer.domElement, base + '_voxels', false, onSaved), recordCanvas(pathsRenderer.domElement, base + '_paths', false, onSaved)];
+  recordStart = Date.now();
+  $('recordBtn').setAttribute('aria-pressed', 'true');
+}
+function stopRecording() {
+  recorders.forEach(r => { if (r.state === 'recording') r.stop(); });
+  recorders = [];
+  landedAt = null;
+  if (pathsRenderer) { pathsRenderer.dispose(); pathsRenderer = null; }
+  $('recordBtn').setAttribute('aria-pressed', 'false');
+  $('recordBtn').innerHTML = '&#9679; Record';
+}
+$('recordBtn').onclick = () => {
+  if (recorders.length) { stopRecording(); return; }
+  startRecording('view', false);
+  if (recorders.length) toast('Recording two videos from this camera, with and without voxels, until 5 s after landing. Press again to stop');
+};
+setInterval(() => {
+  if (!recorders.length || $('recordBtn').getAttribute('aria-pressed') !== 'true') return;
+  const sec = Math.floor((Date.now() - recordStart) / 1000);
+  $('recordBtn').innerHTML = '&#9632; Stop ' + Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+}, 1000);
+function checkRecordingEnd(s) {
+  if (!recorders.length) return;
+  if (s.state === 'LANDED' && landedAt === null) landedAt = Date.now();
+  if (landedAt !== null && Date.now() - landedAt > 5000) stopRecording();
+}
+
 function updateStatus(s) {
   status = s;
+  checkRecordingEnd(s);
+  $('hud').textContent = (s.preset || '') + '   ' + (STATE_TEXT[s.state] || [s.state])[0] + '   ' + Math.floor(s.elapsed / 60) + ':' + String(Math.floor(s.elapsed % 60)).padStart(2, '0') + '   pit ' + s.explored_block_pct.toFixed(0) + '%';
   mapRes = s.map_res || mapRes;
+  $('legVoxel').textContent = mapRes.toFixed(2) + ' m';
   const text = STATE_TEXT[s.state] || [s.state, ''];
   $('state').textContent = text[0];
   $('sub').textContent = text[1];
-  $('pct').textContent = s.explored_pct.toFixed(0) + '%';
-  $('pctBar').style.width = Math.min(100, s.explored_pct) + '%';
+  $('pct').textContent = s.explored_block_pct.toFixed(0) + '%';
+  $('pctBar').style.width = Math.min(100, s.explored_block_pct) + '%';
+  if (!tourBusy) $('tourToggle').checked = !!s.tour;
+  $('staticOption').hidden = s.static_env === undefined; // EPIC has no such mode
+  if (!staticBusy) $('staticToggle').checked = !!s.static_env;
+  if (s.inspect_range > 0) {
+    $('pctLabel').textContent = 'Pit explored (surfaces within ' + s.inspect_range + ' m)';
+    $('floorLabel').textContent = 'Floor inspected (within ' + s.inspect_range + ' m), score only';
+  }
+  $('floorPct').textContent = s.floor_pct < 0 ? '—' : s.floor_pct.toFixed(0) + '%';
+  $('floorBar').style.width = Math.max(0, Math.min(100, s.floor_pct)) + '%';
+  $('surfacePct').textContent = s.surface_pct < 0 ? '—' : s.surface_pct.toFixed(0) + '%';
+  $('surfaceBar').style.width = Math.max(0, Math.min(100, s.surface_pct)) + '%';
+  if (s.preset) $('presetName').textContent = s.preset;
   const sec = Math.floor(s.elapsed);
   $('elapsed').textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
   $('height').textContent = s.position[2].toFixed(1);
   $('frontiers').textContent = s.frontiers < 0 ? '—' : s.frontiers;
   updateRegion(s.region_min, s.region_max);
+  recordHeight(s);
   if (s.state !== 'IDLE') updateHome(s.home);
-  $('log').innerHTML = s.events.slice().reverse().map(e => {
-    const t = Math.floor(e.t);
-    return '<div><time>' + Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') + '</time>' + escapeHtml(e.text) + '</div>';
-  }).join('');
   applyState();
 }
-function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
 function applyState() {
   const st = status ? status.state : null;
   const live = connected && st;
-  $('btnStart').disabled = !(live && st === 'IDLE');
+  $('btnStart').disabled = !(live && (st === 'IDLE' || st === 'LANDED'));
+  $('btnStart').textContent = st === 'LANDED' ? 'Start again' : 'Start mission';
   const pausable = ['ENTRY', 'EXPLORING', 'INSPECTING', 'RETURNING', 'LANDING'].includes(st);
   $('btnPause').textContent = st === 'PAUSED' ? 'Resume' : 'Pause';
   $('btnPause').disabled = !(live && (pausable || st === 'PAUSED'));
@@ -385,6 +966,193 @@ $('btnStart').onclick = () => callCommand('start');
 $('btnPause').onclick = () => callCommand(status && status.state === 'PAUSED' ? 'resume' : 'pause');
 $('btnHome').onclick = () => callCommand('return_home');
 $('btnLand').onclick = () => { if (confirm('Land where the drone is now? This ends the mission.')) callCommand('land'); };
+
+// ---------------------------------------------------------------- height tracker
+const zRuns = {}; // run number -> { pts: [[t, z]], exploreAt: index where exploration began }
+let zFloor = -8, zHover = null;
+const fmtTime = sec => Math.floor(sec / 60) + ':' + String(Math.floor(sec) % 60).padStart(2, '0');
+function recordHeight(s) {
+  zFloor = s.region_min[2];
+  $('runs').innerHTML = (s.finished_runs || []).map((r, i) => '<div>Run ' + (i + 1) + ': ' + fmtTime(r.elapsed) + ', ' +
+    r.explored_pct.toFixed(0) + '% explored, lowest z ' + r.lowest_z.toFixed(1) + ' m</div>').join('');
+  if (s.state === 'IDLE' || s.state === 'LANDED') { drawHeight(); return; }
+  const run = zRuns[s.run] || (zRuns[s.run] = { pts: [], exploreAt: null });
+  run.pts.push([s.elapsed, s.position[2], s.explored_pct, s.floor_pct, s.floor_now_pct, s.explored_block_pct, s.z_target, s.state]);
+  if (s.state === 'EXPLORING' && run.exploreAt === null) run.exploreAt = run.pts.length - 1;
+  updateHeightStats(run);
+  drawHeight();
+}
+function updateHeightStats(run) {
+  const pts = run.pts, last = pts[pts.length - 1];
+  let low = pts[0];
+  pts.forEach(p => { if (p[1] < low[1]) low = p; });
+  $('zLowest').textContent = low[1].toFixed(2);
+  let i = pts.length - 1;
+  while (i > 0 && last[0] - pts[i - 1][0] <= 10) --i;
+  const dt = last[0] - pts[i][0];
+  $('zNow').textContent = dt > 1 ? ((pts[i][1] - last[1]) / dt).toFixed(2) : '—';
+  // net progress downward since exploration took over, so the scripted entry descent does not count
+  if (run.exploreAt !== null) {
+    const start = pts[run.exploreAt];
+    let exLow = start;
+    for (let k = run.exploreAt; k < pts.length; ++k) if (pts[k][1] < exLow[1]) exLow = pts[k];
+    const span = last[0] - start[0];
+    $('zExplore').textContent = span > 1 ? ((start[1] - exLow[1]) / span).toFixed(3) : '—';
+  }
+}
+function drawHeight() {
+  const cv = $('zChart'), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext('2d');
+  c.scale(dpr, dpr);
+  const nums = Object.keys(zRuns).map(Number).sort((a, b) => a - b);
+  const curr = zRuns[nums[nums.length - 1]], prev = zRuns[nums[nums.length - 2]];
+  $('zLegend').style.display = prev ? 'flex' : 'none';
+  let tMax = 60;
+  [curr, prev].forEach(r => { if (r && r.pts.length) tMax = Math.max(tMax, r.pts[r.pts.length - 1][0]); });
+  const L = 30, R = 6, T = 6, B = 18, zMin = Math.floor(zFloor) - 0.5, zMax = 2;
+  const x = t => L + (W - L - R) * t / tMax, y = z => T + (H - T - B) * (zMax - z) / (zMax - zMin);
+  c.font = '11px system-ui, sans-serif';
+  c.textBaseline = 'middle';
+  c.lineWidth = 1;
+  for (let z = 0; z >= zFloor; z -= 2) { // recessive grid
+    c.strokeStyle = '#E0E0E0'; c.beginPath(); c.moveTo(L, y(z)); c.lineTo(W - R, y(z)); c.stroke();
+    c.fillStyle = '#6D6E71'; c.textAlign = 'right'; c.fillText(z, L - 5, y(z));
+  }
+  c.textAlign = 'center';
+  const step = [30, 60, 120, 300, 600, 1200, 3600].find(s => tMax / s <= 5) || 7200;
+  for (let t = 0; t <= tMax; t += step) { c.fillStyle = '#6D6E71'; c.fillText(fmtTime(t), Math.min(x(t), W - 16), H - 8); }
+  c.fillStyle = '#6D6E71'; c.textAlign = 'right'; c.fillText('pit floor', W - R, y(zFloor) - 7);
+  const line = (r, colour) => {
+    c.strokeStyle = colour; c.lineWidth = 2; c.lineJoin = 'round'; c.beginPath();
+    r.pts.forEach((p, i) => i ? c.lineTo(x(p[0]), y(p[1])) : c.moveTo(x(p[0]), y(p[1])));
+    c.stroke();
+  };
+  if (prev) line(prev, '#6D6E71');
+  if (curr) {
+    if (curr.exploreAt !== null) { // when exploration took over
+      const ex = x(curr.pts[curr.exploreAt][0]);
+      c.strokeStyle = '#000'; c.lineWidth = 1; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(ex, T); c.lineTo(ex, H - B); c.stroke(); c.setLineDash([]);
+      c.fillStyle = '#6D6E71'; c.textAlign = 'left'; c.fillText('exploring', Math.min(ex + 3, W - 52), T + 6);
+    }
+    line(curr, '#C41230');
+  }
+  if (zHover !== null && curr && curr.pts.length) { // crosshair and readout
+    const tAt = (zHover - L) / (W - L - R) * tMax;
+    const p = curr.pts.reduce((a, b) => Math.abs(b[0] - tAt) < Math.abs(a[0] - tAt) ? b : a);
+    c.strokeStyle = '#6D6E71'; c.lineWidth = 1; c.beginPath(); c.moveTo(x(p[0]), T); c.lineTo(x(p[0]), H - B); c.stroke();
+    c.fillStyle = '#C41230'; c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.arc(x(p[0]), y(p[1]), 4, 0, 2 * Math.PI); c.fill(); c.stroke();
+    const label = fmtTime(p[0]) + '  z ' + p[1].toFixed(2) + ' m', w = c.measureText(label).width + 10, bx = Math.min(Math.max(L, x(p[0]) - w / 2), W - R - w);
+    c.fillStyle = '#000'; c.fillRect(bx, H - B - 20, w, 17);
+    c.fillStyle = '#fff'; c.textAlign = 'left'; c.fillText(label, bx + 5, H - B - 11);
+  }
+}
+$('zChart').addEventListener('pointermove', e => { zHover = e.clientX - $('zChart').getBoundingClientRect().left; drawHeight(); });
+$('zChart').addEventListener('pointerleave', () => { zHover = null; drawHeight(); });
+window.addEventListener('resize', drawHeight);
+
+// ---------------------------------------------------------------- chosen waypoints
+let plans = [], scoreHover = null;
+const median = v => { if (!v.length) return null; const s = v.slice().sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+function showTab(planTab) {
+  $('tabTerminal').setAttribute('aria-selected', !planTab);
+  $('tabPlans').setAttribute('aria-selected', planTab);
+  $('terminal').style.display = planTab ? 'none' : 'block';
+  $('planView').style.display = planTab ? 'grid' : 'none';
+  if (planTab) drawScores();
+}
+$('tabTerminal').onclick = () => showTab(false);
+// Log panel and height legend can be hidden to give the 3D view more room; the choice is kept for this browser
+function setPanel(id, button, shown, apply) {
+  apply(shown);
+  $(button).setAttribute('aria-pressed', shown);
+  try { localStorage.setItem('mission_' + id, shown ? '1' : '0'); } catch (e) {}
+}
+function savedPanel(id) {
+  try { return localStorage.getItem('mission_' + id) !== '0'; } catch (e) { return true; }
+}
+const showBottom = shown => { $('main').classList.toggle('noBottom', !shown); resize(); };
+const showLegend = shown => { $('legend').classList.toggle('hidden', !shown); };
+$('toggleBottom').onclick = () => setPanel('bottom', 'toggleBottom', $('main').classList.contains('noBottom'), showBottom);
+$('toggleLegend').onclick = () => setPanel('legend', 'toggleLegend', $('legend').classList.contains('hidden'), showLegend);
+setPanel('bottom', 'toggleBottom', savedPanel('bottom'), showBottom);
+setPanel('legend', 'toggleLegend', savedPanel('legend'), showLegend);
+$('tabPlans').onclick = () => showTab(true);
+function updateSystem(s) {
+  const gb = mb => (mb / 1024).toFixed(1);
+  const pct = 100 * s.used_mb / s.total_mb;
+  $('memPct').textContent = pct.toFixed(0) + '%';
+  $('memBar').style.width = Math.min(100, pct) + '%';
+  $('memBar').style.background = pct >= 90 || s.swap_used_mb > 0.5 * s.swap_total_mb ? '#EF3A47' : '';
+  $('memDetail').textContent = gb(s.used_mb) + ' of ' + gb(s.total_mb) + ' GB, swap ' + gb(s.swap_used_mb) + ' of ' + gb(s.swap_total_mb) + ' GB';
+  $('memTop').textContent = s.top.map(p => p.name + ' ' + gb(p.mb)).join(', ');
+}
+function updatePlans(all) {
+  plans = all;
+  planCount = all.length;
+  const dist = p => Math.hypot(p.goal[0] - p.from[0], p.goal[1] - p.from[1], p.goal[2] - p.from[2]);
+  const n = plans.length, sharp = plans.filter(p => p.turn > 90).length, revisit = plans.filter(p => p.revisits > 0).length;
+  const ratios = plans.filter(p => p.learned >= 0 && p.gain > 0).map(p => p.learned / p.gain);
+  const hop = median(plans.map(dist)), ratio = median(ratios);
+  $('psCount').textContent = n;
+  $('psHop').textContent = hop === null ? '—' : hop.toFixed(1);
+  $('psSharp').textContent = n ? sharp + ' (' + Math.round(100 * sharp / n) + '%)' : '—';
+  $('psRevisit').textContent = n ? revisit + ' (' + Math.round(100 * revisit / n) + '%)' : '—';
+  $('psLearned').textContent = ratio === null ? '—' : Math.round(100 * ratio) + '%';
+  $('psScore').textContent = n ? plans[n - 1].score.toFixed(0) : '—';
+  $('planRows').innerHTML = plans.map((p, i) => {
+    const d = [0, 1, 2].map(k => (p.goal[k] - p.from[k]).toFixed(1));
+    return '<tr><td>' + p.kind + '</td><td>' + (i + 1) + '</td><td>' + fmtTime(p.t) + '</td><td>' + p.goal.map(v => v.toFixed(1)).join(', ') + '</td><td>' + d[0] + '</td><td>' + d[1] + '</td><td>' + d[2] +
+      '</td><td>' + dist(p).toFixed(1) + '</td><td>' + p.path_length.toFixed(1) + '</td><td' + (p.turn > 90 ? ' class="flag"' : '') + '>' + p.turn.toFixed(0) +
+      '</td><td>' + p.score.toFixed(0) + '</td><td>' + p.gain.toFixed(0) + '</td><td>' + (p.learned < 0 ? '—' : p.learned.toFixed(0)) +
+      '</td><td' + (p.revisits > 0 ? ' class="flag"' : '') + '>' + p.revisits + '</td><td>' + p.candidates + '</td><td>' + p.reachable + '/' + p.nodes + '</td></tr>';
+  }).reverse().join('');
+  drawScores();
+}
+function drawScores() {
+  const cv = $('scoreChart'), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext('2d');
+  c.scale(dpr, dpr);
+  const L = 36, R = 4, T = 4, B = 4, n = plans.length;
+  const top = Math.max(1, ...plans.map(p => p.score));
+  const x = i => L + (W - L - R) * (n > 1 ? i / (n - 1) : 0), y = v => T + (H - T - B) * (1 - v / top);
+  c.font = '11px system-ui, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'right'; c.fillStyle = '#6D6E71';
+  c.fillText(top.toFixed(0), L - 5, T + 5); c.fillText('0', L - 5, H - B - 4);
+  c.strokeStyle = '#E0E0E0'; c.lineWidth = 1; c.beginPath(); c.moveTo(L, y(0)); c.lineTo(W - R, y(0)); c.stroke();
+  if (!n) return;
+  c.strokeStyle = '#C41230'; c.lineWidth = 2; c.lineJoin = 'round'; c.beginPath();
+  plans.forEach((p, i) => i ? c.lineTo(x(i), y(p.score)) : c.moveTo(x(i), y(p.score)));
+  c.stroke();
+  if (scoreHover !== null) {
+    const i = Math.max(0, Math.min(n - 1, Math.round((scoreHover - L) / (W - L - R) * (n - 1))));
+    c.fillStyle = '#C41230'; c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.arc(x(i), y(plans[i].score), 4, 0, 2 * Math.PI); c.fill(); c.stroke();
+    const label = '#' + (i + 1) + '  score ' + plans[i].score.toFixed(0), w = c.measureText(label).width + 10, bx = Math.min(Math.max(L, x(i) - w / 2), W - R - w);
+    c.fillStyle = '#000'; c.fillRect(bx, T, w, 16);
+    c.fillStyle = '#fff'; c.textAlign = 'left'; c.fillText(label, bx + 5, T + 8);
+  }
+}
+$('scoreChart').addEventListener('pointermove', e => { scoreHover = e.clientX - $('scoreChart').getBoundingClientRect().left; drawScores(); });
+$('scoreChart').addEventListener('pointerleave', () => { scoreHover = null; drawScores(); });
+// One file, time-ordered: 'height' rows carry z_m, 'waypoint' rows carry the chosen goal's fields
+$('logCsv').onclick = () => {
+  const wpFields = 'kind,n,from_x,from_y,from_z,goal_x,goal_y,goal_z,dx,dy,dz,dist,path_length,legs,turn_deg,score,predicted_voxels,learned_voxels,path_time_s,candidates,revisits,roadmap_nodes,reachable_nodes';
+  const blank = ','.repeat(wpFields.split(',').length - 1);
+  const rows = [];
+  Object.keys(zRuns).forEach(n => zRuns[n].pts.forEach(p => rows.push([Number(n), p[0], 0, n + ',' + p[0] + ',height,' + p[1] + ',' + p[2] + ',' + p[3] + ',' + p[4] + ',' + p[5] + ',' + (p[6] === null ? '' : p[6]) + ',' + p[7] + ',' + blank])));
+  plans.forEach((p, i) => {
+    const d = [0, 1, 2].map(k => (p.goal[k] - p.from[k]).toFixed(2));
+    const wp = [p.kind, i + 1, ...p.from, ...p.goal, ...d, Math.hypot(...d).toFixed(2), p.path_length, p.legs, p.turn, p.score, p.gain, p.learned, p.path_time, p.candidates, p.revisits, p.nodes, p.reachable].join(',');
+    rows.push([p.run, p.t, 1, p.run + ',' + p.t + ',waypoint,,,,,,,,' + wp]);
+  });
+  rows.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['run,t_s,type,z_m,pit_pct,floor_pct,floor_now_pct,pit_block_pct,z_target,state,' + wpFields + '\n' + rows.map(r => r[3]).join('\n')], { type: 'text/csv' }));
+  a.download = 'mission_log.csv';
+  a.click();
+};
 
 let toastTimer = null;
 function toast(text) {

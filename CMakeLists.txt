@@ -156,6 +156,7 @@ add_executable(navigation_node src/simulation/navigation_node.cpp)
 add_executable(dynamic_navigation_node src/simulation/dynamic_navigation_node.cpp)
 add_executable(dynamic_inspection_node src/simulation/dynamic_inspection_node.cpp)
 add_executable(dynamic_exploration_node src/simulation/dynamic_exploration_node.cpp)
+add_executable(epic_monitor_node src/simulation/epic_monitor_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -179,6 +180,7 @@ target_link_libraries(navigation_node ${catkin_LIBRARIES} ${PROJECT_NAME})
 target_link_libraries(dynamic_navigation_node ${catkin_LIBRARIES} ${PROJECT_NAME})
 target_link_libraries(dynamic_inspection_node ${catkin_LIBRARIES} ${PROJECT_NAME})
 target_link_libraries(dynamic_exploration_node ${catkin_LIBRARIES} ${PROJECT_NAME})
+target_link_libraries(epic_monitor_node ${catkin_LIBRARIES} ${PROJECT_NAME})
 
 #############
 ## Install ##

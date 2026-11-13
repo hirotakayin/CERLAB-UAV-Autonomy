@@ -100,9 +100,11 @@ namespace AutoFlight{
 		}
 		else{
 			double dt = (currTime - this->prevStateTime_).toSec();
-			this->currAcc_ = (this->currVel_ - this->prevVel_)/dt;
-			this->prevVel_ = this->currVel_; 
-			this->prevStateTime_ = currTime;
+			if (dt > 0.0){ // sim time can stand still between callbacks; 0/0 here puts NaN into the trajectory
+				this->currAcc_ = (this->currVel_ - this->prevVel_)/dt;
+				this->prevVel_ = this->currVel_; 
+				this->prevStateTime_ = currTime;
+			}
 		}		
 	}
 
@@ -238,7 +240,8 @@ namespace AutoFlight{
 		ros::Time startTime = ros::Time::now();
 		ros::Time currTime = ros::Time::now();
 		ros::Rate r (200);
-		while (ros::ok() and not this->isReach(ps)){
+		int motionGen = this->motionGen_;
+		while (ros::ok() and not this->isReach(ps) and motionGen == this->motionGen_){
 			currTime = ros::Time::now();
 			double t = (currTime - startTime).toSec();
 

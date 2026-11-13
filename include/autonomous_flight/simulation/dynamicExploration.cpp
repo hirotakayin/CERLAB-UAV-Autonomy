@@ -5,6 +5,7 @@
 */
 
 #include <autonomous_flight/simulation/dynamicExploration.h>
+#include <autonomous_flight/simulation/climbColumn.h>
 #include <iomanip>
 #include <sstream>
 #include <limits>
@@ -131,6 +132,13 @@ namespace AutoFlight{
 		this->nh_.param("autonomous_flight/inspect_distance", this->inspectDistance_, 2.5);
 		this->nh_.param("autonomous_flight/land_clearance", this->landClearance_, 0.4);
 		this->nh_.param<std::string>("autonomous_flight/land_topic", this->landTopic_, "/CERLAB/quadcopter/land");
+		this->nh_.param<double>("autonomous_flight/floor_z", this->floorZ_, std::numeric_limits<double>::quiet_NaN());
+		this->nh_.param<std::string>("autonomous_flight/preset", this->preset_, "");
+		this->nh_.param<std::string>("autonomous_flight/run_save_dir", this->runSaveDir_, ""); // empty = ~/mission_runs
+		this->nh_.param<double>("autonomous_flight/complete_min_gain", this->completeMinGain_, 1.0);
+		this->nh_.param<int>("autonomous_flight/complete_stall_plans", this->completeStallPlans_, 0); // off unless a config sets it
+		this->nh_.param<double>("autonomous_flight/stuck_land_time", this->stuckLandTime_, 15.0); // s hovering with no way home before landing where it is
+		this->nh_.param<std::string>("autonomous_flight/takeoff_topic", this->takeoffTopic_, "/CERLAB/quadcopter/takeoff");
 
 		// % explored is measured over this region (default: the DEP exploration region)
 		std::vector<double> regionMin, regionMax;
@@ -184,20 +192,7 @@ namespace AutoFlight{
 	void dynamicExploration::registerCallback(){
 		// fly the initial waypoints first (current pose is the path start, like a DEP path)
 		if (this->initialWaypoints_.size() != 0){
-			nav_msgs::Path initialPath;
-			geometry_msgs::PoseStamped start;
-			start.pose = this->odom_.pose.pose;
-			initialPath.poses.push_back(start);
-			for (Eigen::Vector4d& wp : this->initialWaypoints_){
-				geometry_msgs::PoseStamped ps;
-				ps.header.frame_id = "map";
-				ps.pose.position.x = wp(0);
-				ps.pose.position.y = wp(1);
-				ps.pose.position.z = wp(2);
-				ps.pose.orientation = AutoFlight::quaternion_from_rpy(0, 0, wp(3));
-				initialPath.poses.push_back(ps);
-			}
-			this->flyPath(initialPath, NUDGE);
+			this->flyPath(this->makeEntryPath(), NUDGE);
 			this->logEvent("Flying " + std::to_string(this->initialWaypoints_.size()) + " entry waypoints");
 		}
 		else{
@@ -227,6 +222,23 @@ namespace AutoFlight{
 
 		// mark the space the robot flies through as free (the tilted lidar never observes the cone under the robot)
 		this->freeRobotRegionTimer_ = this->nh_.createTimer(ros::Duration(0.1), &dynamicExploration::freeRobotRegionCB, this);
+	}
+
+	nav_msgs::Path dynamicExploration::makeEntryPath(){
+		nav_msgs::Path initialPath;
+		geometry_msgs::PoseStamped start;
+		start.pose = this->odom_.pose.pose;
+		initialPath.poses.push_back(start);
+		for (Eigen::Vector4d& wp : this->initialWaypoints_){
+			geometry_msgs::PoseStamped ps;
+			ps.header.frame_id = "map";
+			ps.pose.position.x = wp(0);
+			ps.pose.position.y = wp(1);
+			ps.pose.position.z = wp(2);
+			ps.pose.orientation = AutoFlight::quaternion_from_rpy(0, 0, wp(3));
+			initialPath.poses.push_back(ps);
+		}
+		return initialPath;
 	}
 
 	void dynamicExploration::freeRobotRegionCB(const ros::TimerEvent&){
@@ -380,6 +392,20 @@ namespace AutoFlight{
 					// ros::Time timeOptEndTime = ros::Time::now();
 					// cout << "[AutoFlight]: Time optimizatoin spends: " << (timeOptEndTime - timeOptStartTime).toSec() << "s." << endl;
 
+					// never hand a non-finite trajectory to the controller
+					bool trajFinite = true;
+					for (double t=0.0; t<=this->trajectory_.getDuration() and trajFinite; t+=0.1){
+						trajFinite = this->trajectory_.at(t).allFinite();
+					}
+					if (not trajFinite){
+						cout << "\033[1;31m[AutoFlight]: Rejected a non-finite trajectory. Hovering.\033[0m" << endl;
+						this->trajectoryReady_ = false;
+						this->stop();
+						this->replan_ = false;
+						this->onPathFinished(false, "non-finite trajectory");
+						return;
+					}
+
 					this->trajectoryReady_ = true;
 					this->replan_ = false;
 					cout << "\033[1;32m[AutoFlight]: Trajectory generated successfully.\033[0m " << endl;
@@ -392,7 +418,7 @@ namespace AutoFlight{
 						this->stop();
 						cout << "[AutoFlight]: Stop!!! Trajectory generation fails." << endl;
 						this->replan_ = false;
-						this->onPathFinished(false);
+						this->onPathFinished(false, "trajectory generation failed");
 					}
 					else if (this->hasDynamicCollision()){
 						this->trajectoryReady_ = false;
@@ -408,7 +434,7 @@ namespace AutoFlight{
 						else{
 							cout << "[AutoFlight]: Unable to generate a feasible trajectory." << endl;
 							this->replan_ = false;
-							this->onPathFinished(false);
+							this->onPathFinished(false, "no feasible trajectory");
 						}
 					}
 				}
@@ -418,7 +444,7 @@ namespace AutoFlight{
 				this->stop();
 				this->replan_ = false;
 				cout << "[AutoFlight]: Goal is not valid. Stop." << endl;
-				this->onPathFinished(false);
+				this->onPathFinished(false, "goal not valid");
 			}
 
 
@@ -440,6 +466,11 @@ namespace AutoFlight{
 		if (this->missionState_ == LAND){
 			double vz = this->odom_.twist.twist.linear.z;
 			if (vz < -0.1) this->descentStarted_ = true;
+			// the fallback descent has no trajectory to finish: the landing target can sit in the inflated ground
+			if (not this->trajectoryReady_ and not this->replan_ and not this->newWaypoints_ and this->currPos()(2) - this->landTarget_(2) < 0.15 and std::abs(vz) < 0.1){
+				this->touchdown();
+				return;
+			}
 			if (not this->descentStarted_ or std::abs(vz) > 0.05 or this->currPos()(2) - this->landTarget_(2) < 0.15){
 				this->touchdownCheckTime_ = ros::Time::now();
 			}
@@ -452,12 +483,19 @@ namespace AutoFlight{
 		if (this->newWaypoints_){
 			this->replan_ = false;
 			this->trajectoryReady_ = false;
-			double yaw = atan2(this->waypoints_.poses[1].pose.position.y - this->odom_.pose.pose.position.y, this->waypoints_.poses[1].pose.position.x - this->odom_.pose.pose.position.x);
+			double dx = this->waypoints_.poses[1].pose.position.x - this->odom_.pose.pose.position.x;
+			double dy = this->waypoints_.poses[1].pose.position.y - this->odom_.pose.pose.position.y;
+			double yaw = atan2(dy, dx);
+			if (std::hypot(dx, dy) < 0.3){ // a vertical leg has no travel direction: face where the path goes next
+				yaw = AutoFlight::rpy_from_quaternion(this->waypoints_.poses[1].pose.orientation);
+			}
 			// cout << "[AutoFlight]: Go to next waypoint. Press ENTER to continue rotation." << endl;
 			// std::cin.clear();
 			// fflush(stdin);
 			// std::cin.get();
+			int motionGen = this->motionGen_;
 			this->moveToOrientation(yaw, this->desiredAngularVel_);
+			if (motionGen != this->motionGen_) return; // a command replaced this leg while rotating
 			// cout << "[AutoFlight]: Press ENTER to move forward." << endl;
 			// std::cin.clear();
 			// fflush(stdin);
@@ -489,9 +527,11 @@ namespace AutoFlight{
 			cout << "[AutoFlight]: Rotate and replan..." << endl;
 			geometry_msgs::Quaternion quat = this->goal_.pose.orientation;
 			double yaw = AutoFlight::rpy_from_quaternion(quat);
+			int motionGen = this->motionGen_;
 			this->waitTime(this->wpStablizeTime_);
 			this->moveToOrientation(yaw, this->desiredAngularVel_);
 			cout << "[AutoFlight]: Finish rotation." << endl;
+			if (motionGen != this->motionGen_) return; // a command replaced this leg while rotating: it did not finish
 			// cout << "[AutoFlight]: Press ENTER to move forward." << endl;
 			// std::cin.clear();
 			// fflush(stdin);
@@ -528,7 +568,7 @@ namespace AutoFlight{
 				this->replan_ = false;
 				this->trajectoryReady_ = false;
 				cout << "[AutoFlight]: Current goal is invalid." << endl;
-				this->onPathFinished(false);
+				this->onPathFinished(false, "current goal invalid");
 				return;
 			}
 		}
@@ -554,7 +594,7 @@ namespace AutoFlight{
 					this->replan_ = false;
 					this->stop();
 					cout << "[AutoFlight]: The goal of the current leg is occupied." << endl;
-					this->onPathFinished(false);
+					this->onPathFinished(false, "goal occupied");
 					return;
 				}
 			}
@@ -563,7 +603,7 @@ namespace AutoFlight{
 				this->replan_ = false;
 				this->stop();
 				cout << "[AutoFlight]: The goal of the current local trajectory is not safe." << endl;
-				this->onPathFinished(false);
+				this->onPathFinished(false, "goal of local trajectory not safe");
 				return;
 			}
 
@@ -605,6 +645,13 @@ namespace AutoFlight{
 			Eigen::Vector3d vel = this->trajectory_.getDerivative().at(this->trajTime_) * linearReparamFactor;
 			Eigen::Vector3d acc = this->trajectory_.getDerivative().getDerivative().at(this->trajTime_) * pow(linearReparamFactor, 2);
 			double endTime = this->trajectory_.getDuration()/linearReparamFactor;
+			this->lastTargetZ_ = pos(2);
+			if (not (pos.allFinite() and vel.allFinite() and acc.allFinite())){
+				cout << "\033[1;31m[AutoFlight]: Non-finite trajectory target. Hovering.\033[0m" << endl;
+				this->trajectoryReady_ = false;
+				this->stop();
+				return;
+			}
 
 			double leftTime = endTime - realTime; 
 			tracking_controller::Target target;
@@ -659,7 +706,7 @@ namespace AutoFlight{
 		double fov = 1.57;
 		for (onboardDetector::box3D ob: obstacles){
 			if (this->detector_->isObstacleInSensorRange(ob, fov)){
-				Eigen::Vector3d lowerBound (ob.x-ob.x_width/2-0.3, ob.y-ob.y_width/2-0.3, ob.z);
+				Eigen::Vector3d lowerBound (ob.x-ob.x_width/2-0.3, ob.y-ob.y_width/2-0.3, ob.z-ob.z_width/2-0.3); // model origin can be its centre
 				Eigen::Vector3d upperBound (ob.x+ob.x_width/2+0.3, ob.y+ob.y_width/2+0.3, ob.z+ob.z_width+0.3);
 				freeRegions.push_back(std::make_pair(lowerBound, upperBound));
 			}
@@ -687,11 +734,15 @@ namespace AutoFlight{
 		this->takeoff();
 		this->logEvent("Takeoff complete");
 
-		int temp1 = system("mkdir ~/rosbag_exploration_info &");
-		int temp2 = system("mv ~/rosbag_exploration_info/exploration_info.bag ~/rosbag_exploration_info/previous.bag &");
-		int temp3 = system("rosbag record -O ~/rosbag_exploration_info/exploration_info.bag /camera/aligned_depth_to_color/image_raw_t /camera/color/image_raw_t /dynamic_map/inflated_voxel_map_t /onboard_detector/dynamic_bboxes /mavros/local_position/pose /dynamicExploration/bspline_trajectory /mavros/setpoint_position/local /tracking_controller/target_pose /dep/best_paths /dep/roadmap /dep/candidate_paths /dep/best_paths /dep/frontier_regions /dynamic_map/2D_occupancy_map __name:=exploration_bag_info &");
-		if (temp1==-1 or temp2==-1 or temp3==-1){
-			cout << "[AutoFlight]: Recording fails." << endl;
+		bool recordRosbag = false; // a bag grows about 25 GB per run
+		this->nh_.param<bool>("autonomous_flight/record_rosbag", recordRosbag, false);
+		if (recordRosbag){
+			int temp1 = system("mkdir ~/rosbag_exploration_info &");
+			int temp2 = system("mv ~/rosbag_exploration_info/exploration_info.bag ~/rosbag_exploration_info/previous.bag &");
+			int temp3 = system("rosbag record -O ~/rosbag_exploration_info/exploration_info.bag /camera/aligned_depth_to_color/image_raw_t /camera/color/image_raw_t /dynamic_map/inflated_voxel_map_t /onboard_detector/dynamic_bboxes /mavros/local_position/pose /dynamicExploration/bspline_trajectory /mavros/setpoint_position/local /tracking_controller/target_pose /dep/best_paths /dep/roadmap /dep/candidate_paths /dep/best_paths /dep/frontier_regions /dynamic_map/2D_occupancy_map __name:=exploration_bag_info &");
+			if (temp1==-1 or temp2==-1 or temp3==-1){
+				cout << "[AutoFlight]: Recording fails." << endl;
+			}
 		}
 
 		this->initExplore();
@@ -733,6 +784,8 @@ namespace AutoFlight{
 		Eigen::Vector3d currAcc = this->currAcc_;
 		Eigen::Vector3d endVel (0.0, 0.0, 0.0);
 		Eigen::Vector3d endAcc (0.0, 0.0, 0.0);
+		if (not currVel.allFinite()) currVel = Eigen::Vector3d (0.0, 0.0, 0.0);
+		if (not currAcc.allFinite()) currAcc = Eigen::Vector3d (0.0, 0.0, 0.0);
 
 		// if (not this->trajectoryReady_){
 		// 	double yaw = AutoFlight::rpy_from_quaternion(this->odom_.pose.pose.orientation);
@@ -831,17 +884,52 @@ namespace AutoFlight{
 			if (command == CMD_RETURN_HOME){
 				this->expPlanner_->setMap(this->map_);
 				nav_msgs::Path path;
-				if (this->expPlanner_->findPathToPoint(this->homePos_, path)){
-					path.poses.back().pose.orientation = AutoFlight::quaternion_from_rpy(0, 0, this->currYaw());
-					this->setPendingPath(path, RETURN);
+				if (this->returnRetries_ == 0 and this->expPlanner_->findPathToPoint(this->homePos_, path)){ // a retry takes the plain climb
+					this->setPendingPath(path, RETURN); // each pose faces the next leg
 					this->logEvent("Returning home (" + std::to_string(int(path.poses.size()) - 1) + " legs)");
 				}
 				else{
-					// no roadmap route: climb to the home height first, then fly across (the pit is open above)
+					// no roadmap route: climb to the home height first, then fly across. Beams and slabs can span the pit, so in the pit
+					// go around obstacles to where the map shows a clear column and climb there. Each retry keeps further from what stopped the last one
 					Eigen::Vector3d p = this->currPos();
-					Eigen::Vector3d climb (p(0), p(1), this->homePos_(2));
-					this->setPendingPath(this->makePath({p, climb, this->homePos_}, this->currYaw()), RETURN);
-					this->logEvent("Returning home: no roadmap route, climbing straight up first");
+					double yawToHome = atan2(this->homePos_(1) - p(1), this->homePos_(0) - p(0));
+					std::vector<Eigen::Vector3d> points {p};
+					Eigen::Vector3d column = p;
+					bool inPit = p(2) < this->progressRegionMax_(2) and p(0) > this->progressRegionMin_(0) and p(0) < this->progressRegionMax_(0) and p(1) > this->progressRegionMin_(1) and p(1) < this->progressRegionMax_(1);
+					if (inPit){
+						Eigen::Vector2d boxMin = this->progressRegionMin_.head<2>() + Eigen::Vector2d (1.0, 1.0), boxMax = this->progressRegionMax_.head<2>() - Eigen::Vector2d (1.0, 1.0);
+						// keep the clearance the B-spline planner insists on beyond the inflated map, or it rejects the route
+						double keep = 0.4;
+						this->nh_.param<double>("bspline_traj/distance_threshold", keep, 0.4);
+						auto blocked = [this, keep](const Eigen::Vector3d& q){
+							if (this->map_->isInflatedOccupied(q)) return true;
+							for (int axis=0; axis<3; ++axis){
+								for (double sign : {-1.0, 1.0}){
+									Eigen::Vector3d r = q;
+									r(axis) += sign * keep;
+									if (this->map_->isInflatedOccupied(r)) return true;
+								}
+							}
+							return false;
+						};
+						std::vector<Eigen::Vector3d> route;
+						if (not AutoFlight::findClimbRoute(p, this->homePos_(2), boxMin, boxMax, 0.2 + 0.2 * this->returnRetries_, blocked, route)){
+							this->stop();
+							this->stuckSince_ = ros::Time::now();
+							this->logEvent("Cannot find a way home: no clear column to climb. Landing where it is in " + std::to_string(int(this->stuckLandTime_)) + " s unless you press Return home");
+							continue;
+						}
+						if (not route.empty()) column = route.back();
+						for (const Eigen::Vector3d& q : route){
+							if ((q - points.back()).norm() > 0.2) points.push_back(q);
+						}
+					}
+					points.push_back(Eigen::Vector3d (column(0), column(1), this->homePos_(2)));
+					points.push_back(this->homePos_);
+					this->setPendingPath(this->makePath(points, yawToHome), RETURN);
+					std::ostringstream text;
+					text << std::fixed << std::setprecision(1) << "Returning home: no roadmap route, climbing at x " << column(0) << ", y " << column(1);
+					this->logEvent(text.str());
 				}
 				continue;
 			}
@@ -872,19 +960,68 @@ namespace AutoFlight{
 			if (this->missionState_ != EXPLORE or not this->explorationReplan_) continue;
 
 			this->expPlanner_->setMap(this->map_);
-			ros::Time startTime = ros::Time::now();
+			ros::WallTime startTime = ros::WallTime::now(); // wall clock: sim time reads short when the sim runs slower than real time
 			bool replanSuccess = this->expPlanner_->makePlan();
-			double planTime = (ros::Time::now() - startTime).toSec();
+			double planTime = (ros::WallTime::now() - startTime).toSec();
 			this->frontierNum_ = this->expPlanner_->getFrontierNum();
+			this->lastPlanSeconds_ = planTime;
 			cout << "[AutoFlight]: DEP planning time: " << planTime << "s." << endl;
 			if (this->missionState_ != EXPLORE or this->pendingCommand_ != CMD_NONE) continue; // a command arrived while planning
 
 			if (replanSuccess){
 				failCount = 0;
 				this->explorationReplan_ = false;
-				this->setPendingPath(this->expPlanner_->getBestPath(), EXPLORE);
+				nav_msgs::Path bestPath = this->expPlanner_->getBestPath();
+				bool tour = this->expPlanner_->isTourEnabled();
+				this->recordPlan(bestPath, tour ? "tour" : "explore");
+				// done when the last few flown plans barely added coverage. Counted in plans, not seconds: a long first
+				// leg can show no gain for 30 s and still be useful. A plan dropped before flying says nothing about coverage
+				const PlanRecord& newest = this->planLog_.back();
+				int stallCount = 0, droppedInRow = 0;
+				double laterCoverage = newest.coverage;
+				bool countingDropped = true, countingStall = this->completeStallPlans_ > 0;
+				for (int i=int(this->planLog_.size())-2; i>=0 and this->planLog_[i].run == newest.run; --i){
+					const PlanRecord& p = this->planLog_[i];
+					if (not p.flown){
+						if (countingDropped) ++droppedInRow;
+						continue;
+					}
+					countingDropped = false;
+					if (not countingStall) break;
+					if (laterCoverage - p.coverage >= this->completeMinGain_) break;
+					laterCoverage = p.coverage;
+					if (++stallCount >= this->completeStallPlans_) break;
+				}
+				bool stalled = not tour and this->completeStallPlans_ > 0 and stallCount >= this->completeStallPlans_; // a tour ends when its areas run out
+				if (droppedInRow >= this->maxExplorationFailures_){
+					this->logEvent("Exploration complete: " + std::to_string(droppedInRow) + " plans in a row could not be flown");
+					this->explorationReplan_ = false;
+					this->returnRetries_ = 0;
+					this->pendingCommand_ = CMD_RETURN_HOME;
+					continue;
+				}
+				if (stalled){
+					std::ostringstream text;
+					text << std::fixed << std::setprecision(0) << "Exploration complete: coverage stopped improving (pit " << this->exploredBlockPercent_.load() << "%, floor " << this->floorPercent_.load() << "%)";
+					this->logEvent(text.str());
+					this->explorationReplan_ = false;
+					this->returnRetries_ = 0;
+					this->pendingCommand_ = CMD_RETURN_HOME;
+					continue;
+				}
+				this->setPendingPath(bestPath, EXPLORE);
 			}
 			else{
+				if (this->expPlanner_->isTourDone()){
+					failCount = 0;
+					this->explorationReplan_ = false;
+					std::ostringstream text;
+					text << std::fixed << std::setprecision(0) << "Exploration complete: the tour has no areas left (pit " << this->exploredBlockPercent_.load() << "%, floor " << this->floorPercent_.load() << "%)";
+					this->logEvent(text.str());
+					this->returnRetries_ = 0;
+					this->pendingCommand_ = CMD_RETURN_HOME;
+					continue;
+				}
 				++failCount;
 				if (this->frontierNum_ == 0 or failCount >= this->maxExplorationFailures_){
 					failCount = 0;
@@ -906,13 +1043,28 @@ namespace AutoFlight{
 		this->resumeSrv_ = this->nh_.advertiseService("/exploration/resume", &dynamicExploration::resumeSrvCB, this);
 		this->returnHomeSrv_ = this->nh_.advertiseService("/exploration/return_home", &dynamicExploration::returnHomeSrvCB, this);
 		this->landSrv_ = this->nh_.advertiseService("/exploration/land", &dynamicExploration::landSrvCB, this);
+		this->tourSrv_ = this->nh_.advertiseService("/exploration/tour", &dynamicExploration::tourSrvCB, this);
+		this->staticSrv_ = this->nh_.advertiseService("/exploration/static", &dynamicExploration::staticSrvCB, this);
 		this->inspectSub_ = this->nh_.subscribe("/exploration/inspect", 1, &dynamicExploration::inspectCB, this);
 		this->statusPub_ = this->nh_.advertise<std_msgs::String>("/exploration/status", 10);
 		this->landPub_ = this->nh_.advertise<std_msgs::Empty>(this->landTopic_, 1);
+		this->takeoffPub_ = this->nh_.advertise<std_msgs::Empty>(this->takeoffTopic_, 1);
+		this->planLogPub_ = this->nh_.advertise<std_msgs::String>("/exploration/plan_log", 1, true); // latched: a reloaded page gets the history
+		this->unknownPub_ = this->nh_.advertise<sensor_msgs::PointCloud2>("/exploration/unknown_voxels", 1);
+		this->floorSeenPub_ = this->nh_.advertise<sensor_msgs::PointCloud2>("/exploration/floor_seen", 1);
+		this->unknownTimer_ = this->nh_.createTimer(ros::Duration(1.0), &dynamicExploration::unknownCB, this);
+		this->restartTimer_ = this->nh_.createTimer(ros::Duration(0.1), &dynamicExploration::restartCheckCB, this);
 		this->statusTimer_ = this->nh_.createTimer(ros::Duration(0.5), &dynamicExploration::statusCB, this);
+		this->clearanceTimer_ = this->nh_.createTimer(ros::Duration(0.1), &dynamicExploration::clearanceCB, this);
 	}
 
 	bool dynamicExploration::startSrvCB(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res){
+		if (this->missionState_ == LANDED){
+			this->restartMission();
+			res.success = true;
+			res.message = "Starting again, keeping the map";
+			return true;
+		}
 		if (this->missionState_ != IDLE){
 			res.success = false;
 			res.message = "Mission already started (" + stateName(this->missionState_) + ")";
@@ -922,6 +1074,87 @@ namespace AutoFlight{
 		res.success = true;
 		res.message = "Starting";
 		return true;
+	}
+
+	bool dynamicExploration::tourSrvCB(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res){
+		res.success = this->expPlanner_->setTourEnabled(req.data);
+		if (not res.success){
+			res.message = "Set gain_block_size in exploration_param.yaml to use the tour";
+			return true;
+		}
+		res.message = req.data ? "Tour on: takes over from the next plan" : "Tour off: greedy goals from the next plan";
+		this->logEvent(res.message);
+		return true;
+	}
+
+	bool dynamicExploration::staticSrvCB(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res){
+		this->expPlanner_->setStaticEnvironment(req.data);
+		res.success = true;
+		res.message = req.data ? "Static environment: any slope through fully known free space, from the next plan" : "Dynamic environment: slopes limited to what the lidar can see ahead, from the next plan";
+		this->logEvent(res.message);
+		return true;
+	}
+
+	bool dynamicExploration::isFloorInspected(double x, double y){
+		for (double z=this->floorZ_-0.3; z<=this->floorZ_+0.3; z+=this->map_->getRes()){
+			if (this->map_->isInspectedHit(Eigen::Vector3d (x, y, z))) return true;
+		}
+		return false;
+	}
+
+	bool dynamicExploration::isFloorHit(double x, double y){
+		for (double z=this->floorZ_-0.3; z<=this->floorZ_+0.3; z+=this->map_->getRes()){
+			Eigen::Vector3d p (x, y, z);
+			if (this->map_->isInMap(p) and this->map_->isOccupied(p)) return true;
+		}
+		return false;
+	}
+
+	void dynamicExploration::restartMission(){
+		// fly again after a landing: re-arm the motors and climb, then restartCheckCB continues. The map is kept
+		Eigen::Vector3d p = this->currPos();
+		bool nearHome = (p.head<2>() - this->homePos_.head<2>()).norm() < 1.0;
+		this->finishedRuns_.push_back({(this->missionEndTime_ - this->missionStartTime_).toSec(), this->exploredPercent_, this->runLowestZ_});
+		this->runLowestZ_ = std::numeric_limits<double>::infinity();
+		this->runSamples_.clear();
+		this->expPlanner_->resetTour();
+		this->sampleClearance_ = std::numeric_limits<double>::infinity();
+		this->runClearance_ = std::numeric_limits<double>::infinity();
+		this->restartTargetZ_ = nearHome ? this->homePos_(2) : p(2) + this->takeoffHgt_;
+		this->missionStartTime_ = ros::Time::now();
+		this->missionEndTime_ = ros::Time();
+		{
+			std::lock_guard<std::mutex> lock (this->eventsMutex_);
+			this->events_.clear();
+		}
+		this->pendingCommand_ = CMD_NONE;
+		this->explorationReplan_ = false;
+		this->pausedRemainingPath_.poses.clear();
+		this->missionState_ = TAKEOFF;
+		this->restartPending_ = true;
+		this->targetPubEnabled_ = true;
+		geometry_msgs::PoseStamped ps;
+		ps.pose = this->odom_.pose.pose;
+		ps.pose.position.z = this->restartTargetZ_;
+		this->updateTarget(ps);
+		this->takeoffPub_.publish(std_msgs::Empty());
+		this->logEvent("Taking off again, keeping the map");
+	}
+
+	void dynamicExploration::restartCheckCB(const ros::TimerEvent&){
+		if (not this->restartPending_ or std::abs(this->currPos()(2) - this->restartTargetZ_) >= 0.15) return;
+		this->restartPending_ = false;
+		this->logEvent("Takeoff complete");
+		bool nearHome = (this->currPos().head<2>() - this->homePos_.head<2>()).norm() < 1.0;
+		if (nearHome and this->initialWaypoints_.size() != 0){
+			this->flyPath(this->makeEntryPath(), NUDGE);
+			this->logEvent("Flying " + std::to_string(this->initialWaypoints_.size()) + " entry waypoints");
+		}
+		else{
+			this->missionState_ = EXPLORE; // landed away from home: explore from here
+			this->explorationReplan_ = true;
+			this->logEvent("Exploring");
+		}
 	}
 
 	bool dynamicExploration::pauseSrvCB(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res){
@@ -941,6 +1174,7 @@ namespace AutoFlight{
 			std::lock_guard<std::mutex> lock (this->pendingPathMutex_);
 			this->pendingPathReady_ = false;
 		}
+		++this->motionGen_;
 		this->stateBeforePause_ = state;
 		this->missionState_ = PAUSED;
 		this->explorationReplan_ = false;
@@ -992,6 +1226,7 @@ namespace AutoFlight{
 			return true;
 		}
 		// hover while the way home is planned, so the current leg cannot finish and be taken for "home reached"
+		++this->motionGen_;
 		{
 			std::lock_guard<std::mutex> lock (this->pendingPathMutex_);
 			this->pendingPathReady_ = false;
@@ -1004,6 +1239,7 @@ namespace AutoFlight{
 		this->stop();
 		this->missionState_ = RETURN;
 		this->returnRetries_ = 0;
+		this->stuckSince_ = ros::Time();
 		this->pendingCommand_ = CMD_RETURN_HOME;
 		this->logEvent("Return home requested");
 		res.success = true;
@@ -1019,6 +1255,7 @@ namespace AutoFlight{
 			return true;
 		}
 		this->pendingCommand_ = CMD_NONE;
+		this->stuckSince_ = ros::Time();
 		this->startLanding();
 		res.success = true;
 		res.message = "Landing";
@@ -1039,9 +1276,13 @@ namespace AutoFlight{
 		this->pendingCommand_ = CMD_INSPECT;
 	}
 
-	void dynamicExploration::onPathFinished(bool success){
+	void dynamicExploration::onPathFinished(bool success, const char* reason){
 		// the current leg ended (reached its last waypoint, or was aborted): decide what comes next
 		int state = this->missionState_;
+		if (state == EXPLORE){
+			this->lastPathEnd_ = reason;
+			if (not success) this->logEvent(std::string("Plan dropped: ") + reason);
+		}
 		if (state == NUDGE){
 			this->missionState_ = EXPLORE;
 			this->explorationReplan_ = true;
@@ -1065,18 +1306,20 @@ namespace AutoFlight{
 			}
 		}
 		else if (state == RETURN){
-			if (success){
+			if (success and (this->currPos() - this->homePos_).norm() < 1.0){
 				this->logEvent("Home reached");
 				this->startLanding();
 			}
-			else if (this->returnRetries_ < 3){
+			else if (this->returnRetries_ < 5){
 				++this->returnRetries_;
-				this->logEvent("Return leg aborted, replanning (" + std::to_string(this->returnRetries_) + "/3)");
+				this->logEvent("Return leg aborted, replanning (" + std::to_string(this->returnRetries_) + "/5)");
 				this->pendingCommand_ = CMD_RETURN_HOME;
 			}
 			else{
-				this->logEvent("Cannot find a way home: landing here");
-				this->startLanding();
+				// never land on its own where it happens to be: that can be the bottom of the pit
+				this->stop();
+				this->stuckSince_ = ros::Time::now();
+				this->logEvent("Cannot find a way home: hovering. Landing where it is in " + std::to_string(int(this->stuckLandTime_)) + " s unless you press Return home");
 			}
 		}
 		else if (state == LAND){
@@ -1122,6 +1365,7 @@ namespace AutoFlight{
 	void dynamicExploration::flyPath(const nav_msgs::Path& path, int state){
 		// main thread only
 		if (path.poses.size() < 2) return;
+		++this->motionGen_;
 		this->waypoints_ = path;
 		this->waypointIdx_ = 1;
 		this->trajectoryReady_ = false;
@@ -1170,6 +1414,7 @@ namespace AutoFlight{
 	}
 
 	void dynamicExploration::touchdown(){
+		++this->motionGen_;
 		this->trajectoryReady_ = false;
 		this->replan_ = false;
 		this->newWaypoints_ = false;
@@ -1177,6 +1422,8 @@ namespace AutoFlight{
 		this->targetPubEnabled_ = false;
 		this->landPub_.publish(std_msgs::Empty());
 		this->missionState_ = LANDED;
+		this->missionEndTime_ = ros::Time::now();
+		this->saveRun();
 		this->logEvent("Landed");
 	}
 
@@ -1219,7 +1466,267 @@ namespace AutoFlight{
 		return path;
 	}
 
+	void dynamicExploration::publishCloud(ros::Publisher& pub, const std::vector<Eigen::Vector3d>& points){
+		sensor_msgs::PointCloud2 cloud;
+		cloud.header.frame_id = "map";
+		cloud.header.stamp = ros::Time::now();
+		cloud.height = 1;
+		sensor_msgs::PointCloud2Modifier modifier (cloud);
+		modifier.setPointCloud2FieldsByString(1, "xyz");
+		modifier.resize(points.size());
+		sensor_msgs::PointCloud2Iterator<float> iterX (cloud, "x"), iterY (cloud, "y"), iterZ (cloud, "z");
+		for (const Eigen::Vector3d& p : points){
+			*iterX = p(0); *iterY = p(1); *iterZ = p(2);
+			++iterX; ++iterY; ++iterZ;
+		}
+		pub.publish(cloud);
+	}
+
+	void dynamicExploration::clearanceCB(const ros::TimerEvent&){
+		// drone centre to the surface of the nearest occupied voxel within 1.5 m. Faster than the 2 Hz log,
+		// which can fly past a beam between samples
+		if (this->missionStartTime_.isZero() or this->missionState_ == LANDED) return;
+		Eigen::Vector3d p = this->currPos();
+		double res = this->map_->getRes(), clearance = std::numeric_limits<double>::infinity();
+		int range = int(std::ceil(1.5 / res));
+		for (int i=-range; i<=range; ++i){
+			for (int j=-range; j<=range; ++j){
+				for (int k=-range; k<=range; ++k){
+					Eigen::Vector3d offset (i * res, j * res, k * res);
+					Eigen::Vector3d q = p + offset;
+					if (not this->map_->isInMap(q) or not this->map_->isOccupied(q)) continue;
+					Eigen::Vector3d gap = (offset.cwiseAbs().array() - res/2).max(0.0).matrix();
+					clearance = std::min(clearance, gap.norm());
+				}
+			}
+		}
+		this->sampleClearance_ = std::min(this->sampleClearance_, clearance);
+		if (this->missionState_ != TAKEOFF and this->missionState_ != LAND) this->runClearance_ = std::min(this->runClearance_, clearance);
+	}
+
+	void dynamicExploration::unknownCB(const ros::TimerEvent&){
+		// a thin lidar ray leaves unknown voxels between known ones, so a single voxel says little: only a 0.6 m
+		// block with no known voxel at all counts as unexplored
+		double res = this->map_->getRes(), block = 3.0 * res;
+		std::vector<Eigen::Vector3d> blocks;
+		long total = 0;
+		for (double x=this->progressRegionMin_(0)+block/2; x<this->progressRegionMax_(0); x+=block){
+			for (double y=this->progressRegionMin_(1)+block/2; y<this->progressRegionMax_(1); y+=block){
+				for (double z=this->progressRegionMin_(2)+block/2; z<this->progressRegionMax_(2); z+=block){
+					++total;
+					bool anyKnown = false, pending = false; // open air clears from any range, a surface only from inspect_range
+					for (int i=-1; i<=1 and not pending; ++i){
+						for (int j=-1; j<=1 and not pending; ++j){
+							for (int k=-1; k<=1 and not pending; ++k){
+								Eigen::Vector3d p (x + i * res, y + j * res, z + k * res);
+								anyKnown = anyKnown or (this->map_->isInMap(p) and not this->map_->isUnknown(p));
+								pending = this->map_->isInspectionPending(p);
+							}
+						}
+					}
+					if (not anyKnown or pending) blocks.push_back(Eigen::Vector3d (x, y, z));
+				}
+			}
+		}
+		if (total != 0) this->exploredBlockPercent_ = 100.0 * double(total - long(blocks.size())) / double(total);
+
+		// needs no floor height, so it works on any structure. Reaches below the box so a floor just under it counts
+		if (this->map_->getInspectRange() > 0.0){
+			long confirmed = 0, pendingVoxels = 0;
+			for (double x=this->progressRegionMin_(0); x<this->progressRegionMax_(0); x+=res){
+				for (double y=this->progressRegionMin_(1); y<this->progressRegionMax_(1); y+=res){
+					for (double z=this->progressRegionMin_(2)-block; z<this->progressRegionMax_(2); z+=res){
+						Eigen::Vector3d p (x, y, z);
+						if (this->map_->isInspectedHit(p)) ++confirmed;
+						else if (this->map_->isInspectionPending(p)) ++pendingVoxels;
+					}
+				}
+			}
+			if (confirmed + pendingVoxels != 0) this->surfacePercent_ = 100.0 * double(confirmed) / double(confirmed + pendingVoxels);
+		}
+		if (this->unknownPub_.getNumSubscribers() != 0) this->publishCloud(this->unknownPub_, blocks);
+
+		if (this->floorSeenPub_.getNumSubscribers() != 0){
+			std::vector<Eigen::Vector3d> seen;
+			{
+				std::lock_guard<std::mutex> lock (this->floorSeenMutex_);
+				if (not this->floorSeen_.empty()){
+					int rows = int(this->floorSeen_.size()) / this->floorCols_;
+					for (int i=0; i<this->floorCols_; ++i){
+						for (int j=0; j<rows; ++j){
+							if (this->floorSeen_[i * rows + j]) seen.push_back(Eigen::Vector3d (this->progressRegionMin_(0) + (i + 0.5) * res, this->progressRegionMin_(1) + (j + 0.5) * res, this->floorZ_));
+						}
+					}
+				}
+			}
+			this->publishCloud(this->floorSeenPub_, seen);
+		}
+	}
+
+	// Orthographic view of the flown path inside the pit wireframe, from the +x, -y side and 30 deg above. Boxes come
+	// from the world model the launch file loads; the ground around the pit is left out. Sets height, returns SVG
+	static std::string orthoView(const std::string& sdf, const std::vector<Eigen::Vector3d>& path, const std::vector<Eigen::Vector3d>& goals,
+	                             const Eigen::Vector3d& home, double left, double top, double width, double& height){
+		const double az = -35.0 * M_PI / 180.0, el = 30.0 * M_PI / 180.0;
+		const Eigen::Vector3d right (-sin(az), cos(az), 0), up (-sin(el) * cos(az), -sin(el) * sin(az), cos(el));
+		std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> boxes; // center, size
+		size_t at = 0;
+		while ((at = sdf.find("<collision name=", at)) != std::string::npos){
+			size_t end = sdf.find("</collision>", at);
+			if (end == std::string::npos) break;
+			std::string block = sdf.substr(at, end - at);
+			at = end;
+			size_t pose = block.find("<pose>"), size = block.find("<size>");
+			if (block.find("top_ground") != std::string::npos or pose == std::string::npos or size == std::string::npos) continue;
+			std::istringstream poseText (block.substr(pose + 6)), sizeText (block.substr(size + 6));
+			Eigen::Vector3d c, d;
+			poseText >> c(0) >> c(1) >> c(2);
+			sizeText >> d(0) >> d(1) >> d(2);
+			if (poseText and sizeText) boxes.push_back({c, d});
+		}
+
+		// fit: same scale as the other views unless the view would be wider than they are
+		double uMin = std::numeric_limits<double>::infinity(), uMax = -uMin, vMin = uMin, vMax = -uMin;
+		auto fit = [&](const Eigen::Vector3d& p){
+			uMin = std::min(uMin, p.dot(right)); uMax = std::max(uMax, p.dot(right));
+			vMin = std::min(vMin, p.dot(up)); vMax = std::max(vMax, p.dot(up));
+		};
+		auto corner = [](const std::pair<Eigen::Vector3d, Eigen::Vector3d>& b, int i){
+			return Eigen::Vector3d (b.first(0) + ((i & 1) ? 0.5 : -0.5) * b.second(0), b.first(1) + ((i & 2) ? 0.5 : -0.5) * b.second(1), b.first(2) + ((i & 4) ? 0.5 : -0.5) * b.second(2));
+		};
+		for (const auto& b : boxes) for (int i=0; i<8; ++i) fit(corner(b, i));
+		for (const Eigen::Vector3d& p : path) fit(p);
+		for (const Eigen::Vector3d& p : goals) fit(p);
+		fit(home);
+		double scale = std::min(40.0, width / std::max(uMax - uMin, 1.0));
+		height = (vMax - vMin) * scale;
+		auto sx = [&](const Eigen::Vector3d& p){return left + (p.dot(right) - uMin) * scale;};
+		auto sy = [&](const Eigen::Vector3d& p){return top + (vMax - p.dot(up)) * scale;};
+
+		std::ostringstream svg;
+		svg << std::fixed << std::setprecision(1);
+		svg << "<path fill='none' stroke='#9AA0A6' stroke-width='1' d='";
+		for (const auto& b : boxes){
+			for (int i=0; i<8; ++i){
+				for (int axis=1; axis<8; axis*=2){
+					if (i & axis) continue; // each edge once, from its lower corner
+					Eigen::Vector3d p = corner(b, i), q = corner(b, i | axis);
+					svg << "M" << sx(p) << " " << sy(p) << "L" << sx(q) << " " << sy(q);
+				}
+			}
+		}
+		svg << "'/>\n<polyline fill='none' stroke='#C41230' stroke-width='1.5' points='";
+		for (const Eigen::Vector3d& p : path) svg << sx(p) << "," << sy(p) << " ";
+		svg << "'/>\n";
+		for (const Eigen::Vector3d& g : goals) svg << "<circle cx='" << sx(g) << "' cy='" << sy(g) << "' r='3' fill='#000'/>\n";
+		svg << "<circle cx='" << sx(home) << "' cy='" << sy(home) << "' r='8' fill='none' stroke='#000' stroke-width='2'/>\n";
+		return svg.str();
+	}
+
+	void dynamicExploration::saveRun(){
+		// one CSV and one picture (flight path from above and from the side) per landed run
+		if (this->runSamples_.empty()) return;
+		if (this->runSaveDir_.empty()){
+			const char* home = getenv("HOME");
+			this->runSaveDir_ = std::string(home == NULL ? "." : home) + "/mission_runs";
+			mkdir(this->runSaveDir_.c_str(), 0755);
+		}
+		char stamp[32];
+		std::time_t now = std::time(NULL);
+		std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", std::localtime(&now));
+		int run = int(this->finishedRuns_.size()) + 1;
+		std::string base = this->runSaveDir_ + "/" + stamp + (this->preset_.empty() ? "" : "_" + this->preset_) + (this->expPlanner_->isStaticEnvironment() ? "_static" : "") + "_run" + std::to_string(run);
+
+		std::ofstream csv (base + ".csv");
+		csv << std::fixed << std::setprecision(2);
+		csv << "run,t_s,type,state,x_m,y_m,z_m,z_target_m,pit_pct,pit_block_pct,floor_pct,floor_now_pct,kind,n,goal_x,goal_y,goal_z,dist,path_length,legs,turn_deg,score,predicted_voxels,learned_voxels,path_time_s,candidates,revisits,roadmap_nodes,reachable_nodes,plan_time_s,flown,plan_end,tour_cells_left,tour_areas_given_up,min_clearance_m,surface_pct\n";
+		std::vector<std::pair<double, std::string>> rows;
+		for (const RunSample& r : this->runSamples_){
+			std::ostringstream row;
+			row << std::fixed << std::setprecision(2) << run << "," << r.t << ",height," << r.state << "," << r.x << "," << r.y << "," << r.z << ",";
+			if (not std::isnan(r.zTarget)) row << r.zTarget;
+			row << "," << r.pit << "," << r.pitBlock << "," << r.floor << "," << r.floorNow << ",,,,,,,,,,,,,,,,,,,,,,,";
+			if (not std::isinf(r.clearance)) row << r.clearance;
+			row << ",";
+			if (r.surface >= 0.0) row << r.surface;
+			rows.push_back({r.t, row.str()});
+		}
+		std::vector<Eigen::Vector3d> goals;
+		for (size_t i=0; i<this->planLog_.size(); ++i){
+			const PlanRecord& p = this->planLog_[i];
+			if (p.run != run) continue;
+			goals.push_back(p.goal);
+			std::ostringstream row;
+			row << std::fixed << std::setprecision(2) << run << "," << p.t << ",waypoint,,,,,,,,,," << p.kind << "," << i + 1 << "," << p.goal(0) << "," << p.goal(1) << "," << p.goal(2) << "," << (p.goal - p.from).norm() << ","
+				<< p.pathLength << "," << p.legs << "," << p.turn << "," << p.score << "," << p.gain << "," << p.learned << "," << p.pathTime << "," << p.candidates << "," << p.revisits << "," << p.nodes << "," << p.reachable << "," << p.planSeconds << "," << (p.flown ? 1 : 0) << "," << p.ended << ",";
+			if (p.kind == "tour") row << p.tourCellsLeft << "," << p.tourGivenUp;
+			else row << ",";
+			row << ",,";
+			rows.push_back({p.t, row.str()});
+		}
+		std::stable_sort(rows.begin(), rows.end(), [](const std::pair<double, std::string>& a, const std::pair<double, std::string>& b){return a.first < b.first;});
+		for (const std::pair<double, std::string>& row : rows) csv << row.second << "\n";
+
+		// picture: same scale in both views, pit outline, home, chosen goals and the flown path
+		Eigen::Vector3d lo = this->progressRegionMin_, hi = this->progressRegionMax_;
+		double lowest = std::numeric_limits<double>::infinity();
+		for (const RunSample& r : this->runSamples_){
+			lo = lo.cwiseMin(Eigen::Vector3d (r.x, r.y, r.z));
+			hi = hi.cwiseMax(Eigen::Vector3d (r.x, r.y, r.z));
+			lowest = std::min(lowest, r.z);
+		}
+		lo = lo.cwiseMin(this->homePos_) - Eigen::Vector3d (1, 1, 1);
+		hi = hi.cwiseMax(this->homePos_) + Eigen::Vector3d (1, 1, 1);
+		double scale = 40.0, margin = 50.0, topY = 90.0;
+		double width = (hi(1) - lo(1)) * scale;
+		double xyHeight = (hi(0) - lo(0)) * scale, xzHeight = (hi(2) - lo(2)) * scale;
+		// long pit axis runs left to right in both views: horizontal is y
+		auto sx = [&](double y){return margin + (y - lo(1)) * scale;};
+		auto syTop = [&](double x){return topY + (hi(0) - x) * scale;};
+		double sideTop = topY + xyHeight + 70.0;
+		auto sySide = [&](double z){return sideTop + (hi(2) - z) * scale;};
+		std::string worldSdf;
+		this->nh_.getParam("autonomous_flight/world_sdf", worldSdf);
+		std::vector<Eigen::Vector3d> flown;
+		for (const RunSample& r : this->runSamples_) flown.push_back(Eigen::Vector3d (r.x, r.y, r.z));
+		double orthoTop = sideTop + xzHeight + 70.0, orthoHeight = 0.0;
+		std::string ortho = orthoView(worldSdf, flown, goals, this->homePos_, margin, orthoTop, width, orthoHeight);
+		std::ofstream svg (base + ".svg");
+		svg << std::fixed << std::setprecision(1);
+		svg << "<svg xmlns='http://www.w3.org/2000/svg' width='" << width + 2 * margin << "' height='" << orthoTop + orthoHeight + 40 << "' font-family='sans-serif' font-size='14'>\n";
+		svg << "<rect width='100%' height='100%' fill='white'/>\n";
+		svg << "<text x='" << margin << "' y='28' font-size='18' font-weight='bold'>Run " << run << ", " << stamp << (this->preset_.empty() ? "" : ", " + this->preset_) << "</text>\n";
+		svg << "<text x='" << margin << "' y='52'>" << this->runSamples_.back().t << " s, pit " << this->exploredBlockPercent_.load() << "% (voxels " << this->exploredPercent_ << "%), floor " << this->floorPercent_.load() << "%, lowest z " << lowest << " m, closest obstacle ";
+		if (std::isinf(this->runClearance_)) svg << "over 1.5"; else svg << std::setprecision(2) << this->runClearance_ << std::setprecision(1);
+		svg << " m, " << goals.size() << " goals</text>\n";
+		svg << "<text x='" << margin << "' y='" << topY - 8 << "' font-weight='bold'>From above (horizontal y, vertical x)</text>\n";
+		svg << "<text x='" << margin << "' y='" << sideTop - 8 << "' font-weight='bold'>From the side (horizontal y, vertical z)</text>\n";
+		svg << "<rect x='" << sx(this->progressRegionMin_(1)) << "' y='" << syTop(this->progressRegionMax_(0)) << "' width='" << (this->progressRegionMax_(1) - this->progressRegionMin_(1)) * scale << "' height='" << (this->progressRegionMax_(0) - this->progressRegionMin_(0)) * scale << "' fill='#E0E0E0' stroke='#6D6E71'/>\n";
+		svg << "<rect x='" << sx(this->progressRegionMin_(1)) << "' y='" << sySide(this->progressRegionMax_(2)) << "' width='" << (this->progressRegionMax_(1) - this->progressRegionMin_(1)) * scale << "' height='" << (this->progressRegionMax_(2) - this->progressRegionMin_(2)) * scale << "' fill='#E0E0E0' stroke='#6D6E71'/>\n";
+		svg << "<polyline fill='none' stroke='#C41230' stroke-width='1.5' points='";
+		for (const RunSample& r : this->runSamples_) svg << sx(r.y) << "," << syTop(r.x) << " ";
+		svg << "'/>\n<polyline fill='none' stroke='#C41230' stroke-width='1.5' points='";
+		for (const RunSample& r : this->runSamples_) svg << sx(r.y) << "," << sySide(r.z) << " ";
+		svg << "'/>\n";
+		for (const Eigen::Vector3d& g : goals){
+			svg << "<circle cx='" << sx(g(1)) << "' cy='" << syTop(g(0)) << "' r='3' fill='#000'/><circle cx='" << sx(g(1)) << "' cy='" << sySide(g(2)) << "' r='3' fill='#000'/>\n";
+		}
+		svg << "<circle cx='" << sx(this->homePos_(1)) << "' cy='" << syTop(this->homePos_(0)) << "' r='8' fill='none' stroke='#000' stroke-width='2'/><circle cx='" << sx(this->homePos_(1)) << "' cy='" << sySide(this->homePos_(2)) << "' r='8' fill='none' stroke='#000' stroke-width='2'/>\n";
+		svg << "<text x='" << margin << "' y='" << orthoTop - 8 << "' font-weight='bold'>Orthographic view (from +x, -y, 30 deg above)</text>\n" << ortho;
+		svg << "<text x='" << margin << "' y='" << orthoTop + orthoHeight + 24 << "' fill='#6D6E71'>Red: flown path. Black dots: chosen goals. Ring: home. Gray: pit interior, and pit walls, columns and beams in the orthographic view.</text>\n</svg>\n";
+		this->logEvent("Saved this run: " + base + ".svg and .csv");
+	}
+
 	void dynamicExploration::statusCB(const ros::TimerEvent&){
+		// no way home and nobody stepped in: land where it is, so an unattended run ends and saves its log
+		if (not this->stuckSince_.isZero() and (ros::Time::now() - this->stuckSince_).toSec() >= this->stuckLandTime_){
+			this->stuckSince_ = ros::Time();
+			if (this->missionState_ == RETURN){
+				this->logEvent("No way home after " + std::to_string(int(this->stuckLandTime_)) + " s: landing where it is");
+				this->pendingCommand_ = CMD_NONE;
+				this->startLanding();
+			}
+		}
 		// % explored: known voxels in the progress region (main thread: owns the map)
 		Eigen::Vector3d size = this->progressRegionMax_ - this->progressRegionMin_;
 		if (size.minCoeff() > 0){
@@ -1239,14 +1746,57 @@ namespace AutoFlight{
 			this->exploredVolume_ = double(known) * pow(res, 3);
 		}
 
+		// % floor covered: floor columns of the progress region where the lidar has hit the floor
+		if (not std::isnan(this->floorZ_) and size.minCoeff() > 0){
+			double res = this->map_->getRes();
+			int cols = int(std::ceil(size(0)/res)), rows = int(std::ceil(size(1)/res));
+			long seen = 0, now = 0;
+			std::lock_guard<std::mutex> lock (this->floorSeenMutex_);
+			if (this->floorSeen_.empty()){
+				this->floorSeen_.assign(cols * rows, 0);
+				this->floorCols_ = cols;
+			}
+			for (int i=0; i<cols; ++i){
+				for (int j=0; j<rows; ++j){
+					double cellX = this->progressRegionMin_(0) + (i + 0.5) * res, cellY = this->progressRegionMin_(1) + (j + 0.5) * res;
+					if (this->isFloorHit(cellX, cellY)) ++now;
+					if (this->isFloorInspected(cellX, cellY)) this->floorSeen_[i * rows + j] = 1;
+					if (this->floorSeen_[i * rows + j]) ++seen;
+				}
+			}
+			this->floorPercent_ = 100.0 * double(seen) / double(cols * rows);
+			this->floorNowPercent_ = 100.0 * double(now) / double(cols * rows);
+		}
+
 		Eigen::Vector3d p = this->currPos();
-		double elapsed = this->missionStartTime_.isZero() ? 0.0 : (ros::Time::now() - this->missionStartTime_).toSec();
+		double elapsed = this->missionStartTime_.isZero() ? 0.0 : ((this->missionEndTime_.isZero() ? ros::Time::now() : this->missionEndTime_) - this->missionStartTime_).toSec();
+		if (not this->missionStartTime_.isZero() and this->missionState_ != LANDED){
+			this->runLowestZ_ = std::min(this->runLowestZ_, p(2));
+			this->runSamples_.push_back({stateName(this->missionState_), elapsed, p(0), p(1), p(2), this->lastTargetZ_, this->exploredPercent_, this->exploredBlockPercent_.load(), this->floorPercent_.load(), this->floorNowPercent_, this->sampleClearance_, this->surfacePercent_.load()});
+			this->sampleClearance_ = std::numeric_limits<double>::infinity();
+		}
 		std::ostringstream json;
 		json << std::fixed << std::setprecision(2);
 		json << "{\"state\":\"" << stateName(this->missionState_) << "\"";
 		json << ",\"paused_state\":\"" << (this->missionState_ == PAUSED ? stateName(this->stateBeforePause_) : "") << "\"";
 		json << ",\"elapsed\":" << elapsed;
+		json << ",\"run\":" << this->finishedRuns_.size() + 1;
+		json << ",\"finished_runs\":[";
+		for (size_t i=0; i<this->finishedRuns_.size(); ++i){
+			json << (i == 0 ? "" : ",") << "{\"elapsed\":" << this->finishedRuns_[i][0] << ",\"explored_pct\":" << this->finishedRuns_[i][1] << ",\"lowest_z\":" << this->finishedRuns_[i][2] << "}";
+		}
+		json << "]";
 		json << ",\"explored_pct\":" << this->exploredPercent_;
+		json << ",\"floor_pct\":" << (std::isnan(this->floorZ_) ? -1.0 : this->floorPercent_.load());
+		json << ",\"explored_block_pct\":" << this->exploredBlockPercent_.load();
+		json << ",\"z_target\":";
+		if (std::isnan(this->lastTargetZ_)) json << "null"; else json << this->lastTargetZ_;
+		json << ",\"floor_now_pct\":" << (std::isnan(this->floorZ_) ? -1.0 : this->floorNowPercent_);
+		json << ",\"inspect_range\":" << this->map_->getInspectRange();
+		json << ",\"preset\":\"" << this->preset_ << "\"";
+		json << ",\"surface_pct\":" << this->surfacePercent_.load();
+		json << ",\"tour\":" << (this->expPlanner_ and this->expPlanner_->isTourEnabled() ? "true" : "false");
+		json << ",\"static_env\":" << (this->expPlanner_ and this->expPlanner_->isStaticEnvironment() ? "true" : "false");
 		json << ",\"explored_m3\":" << this->exploredVolume_;
 		json << ",\"frontiers\":" << this->frontierNum_;
 		json << ",\"map_res\":" << this->map_->getRes();
@@ -1266,6 +1816,68 @@ namespace AutoFlight{
 		std_msgs::String msg;
 		msg.data = json.str();
 		this->statusPub_.publish(msg);
+	}
+
+	void dynamicExploration::recordPlan(const nav_msgs::Path& path, const std::string& kind){
+		// planning thread
+		PlanRecord r;
+		r.kind = kind;
+		r.run = int(this->finishedRuns_.size()) + 1;
+		r.t = (ros::Time::now() - this->missionStartTime_).toSec();
+		r.from = this->currPos();
+		const geometry_msgs::Point& g = path.poses.back().pose.position;
+		r.goal = Eigen::Vector3d (g.x, g.y, g.z);
+		r.pathLength = 0.0;
+		r.legs = int(path.poses.size()) - 1;
+		for (size_t i=0; i+1<path.poses.size(); ++i){
+			const geometry_msgs::Point& a = path.poses[i].pose.position;
+			const geometry_msgs::Point& b = path.poses[i+1].pose.position;
+			r.pathLength += Eigen::Vector3d (b.x - a.x, b.y - a.y, b.z - a.z).norm();
+		}
+		Eigen::Vector3d delta = r.goal - r.from;
+		r.heading = atan2(delta(1), delta(0)) * 180.0 / PI_const;
+		r.turn = 0.0;
+		r.revisits = 0;
+		double res = this->map_->getRes();
+		r.knownAtPlan = this->exploredVolume_ / pow(res, 3);
+		r.coverage = this->exploredBlockPercent_.load(); // decides when to stop: no floor % here, the planner does not know the floor
+		r.learned = -1.0;
+		r.flown = false;
+		r.planSeconds = this->lastPlanSeconds_;
+		r.tourCellsLeft = r.tourGivenUp = 0;
+		if (kind == "tour") this->expPlanner_->getTourStats(r.tourCellsLeft, r.tourGivenUp);
+		this->expPlanner_->getBestPathScore(r.score, r.gain, r.pathTime, r.candidates);
+		this->expPlanner_->getRoadmapStats(r.nodes, r.reachable);
+		if (not this->planLog_.empty() and this->planLog_.back().run == r.run){
+			r.turn = std::abs(fmod(r.heading - this->planLog_.back().heading + 540.0, 360.0) - 180.0);
+		}
+		if (not this->planLog_.empty()){
+			PlanRecord& previous = this->planLog_.back();
+			previous.learned = r.knownAtPlan - previous.knownAtPlan;
+			previous.flown = previous.run == r.run and (r.from - previous.from).norm() >= 0.75; // more than hover drift or overshoot
+			previous.ended = this->lastPathEnd_.exchange("");
+		}
+		for (const PlanRecord& p : this->planLog_){
+			if (p.run == r.run and (p.goal - r.goal).norm() < 1.0) ++r.revisits;
+		}
+		this->planLog_.push_back(r);
+		cout << "[Plan " << this->planLog_.size() << "]: goal " << r.goal.transpose() << " delta " << delta.transpose() << " turn " << r.turn << " deg, score " << r.score << ", predicted voxels " << r.gain << ", path time " << r.pathTime << "s, revisits " << r.revisits << ", roadmap reachable " << r.reachable << "/" << r.nodes << endl;
+
+		std::ostringstream json;
+		json << std::fixed << std::setprecision(2) << "[";
+		for (size_t i=0; i<this->planLog_.size(); ++i){
+			const PlanRecord& p = this->planLog_[i];
+			json << (i == 0 ? "" : ",") << "{\"kind\":\"" << p.kind << "\",\"run\":" << p.run << ",\"t\":" << p.t
+				<< ",\"from\":[" << p.from(0) << "," << p.from(1) << "," << p.from(2) << "]"
+				<< ",\"goal\":[" << p.goal(0) << "," << p.goal(1) << "," << p.goal(2) << "]"
+				<< ",\"path_length\":" << p.pathLength << ",\"legs\":" << p.legs << ",\"turn\":" << p.turn
+				<< ",\"score\":" << p.score << ",\"gain\":" << p.gain << ",\"path_time\":" << p.pathTime
+				<< ",\"candidates\":" << p.candidates << ",\"learned\":" << p.learned << ",\"revisits\":" << p.revisits << ",\"nodes\":" << p.nodes << ",\"reachable\":" << p.reachable << "}";
+		}
+		json << "]";
+		std_msgs::String msg;
+		msg.data = json.str();
+		this->planLogPub_.publish(msg);
 	}
 
 	void dynamicExploration::logEvent(const std::string& text){

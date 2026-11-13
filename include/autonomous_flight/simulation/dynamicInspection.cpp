@@ -369,11 +369,15 @@ namespace AutoFlight{
 		std::cin.get();
 		this->takeoff();
 
-		int temp1 = system("mkdir ~/rosbag_inspection_info &");
-		int temp2 = system("mv ~/rosbag_inspection_info/inspection_info.bag ~/rosbag_inspection/previous.bag &");
-		int temp3 = system("rosbag record -O ~/rosbag_inspection_info/inspection_info.bag /inspection/rrt_path /inspection/poly_trajectory /inspection/pwl_trajectory /inspection/bspline_trajectory /dynamic_map/inflated_voxel_map_t /onboard_detector/dynamic_bboxes /mavros/local_position/pose __name:=inspection_bag_info &");
-		if (temp1==-1 or temp2==-1 or temp3==-1){
-			cout << "[AutoFlight]: Recording fails." << endl;
+		bool recordRosbag = false; // a bag grows about 25 GB per run
+		this->nh_.param<bool>("autonomous_flight/record_rosbag", recordRosbag, false);
+		if (recordRosbag){
+			int temp1 = system("mkdir ~/rosbag_inspection_info &");
+			int temp2 = system("mv ~/rosbag_inspection_info/inspection_info.bag ~/rosbag_inspection/previous.bag &");
+			int temp3 = system("rosbag record -O ~/rosbag_inspection_info/inspection_info.bag /inspection/rrt_path /inspection/poly_trajectory /inspection/pwl_trajectory /inspection/bspline_trajectory /dynamic_map/inflated_voxel_map_t /onboard_detector/dynamic_bboxes /mavros/local_position/pose __name:=inspection_bag_info &");
+			if (temp1==-1 or temp2==-1 or temp3==-1){
+				cout << "[AutoFlight]: Recording fails." << endl;
+			}
 		}
 
 

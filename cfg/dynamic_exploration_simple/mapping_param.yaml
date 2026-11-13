@@ -41,7 +41,7 @@ p_occ: 0.80
 map_resolution: 0.2
 ground_height: -8.5 # m, bottom of the map: just below the excavation_simple pit floor (-8 m)
 map_size: [20, 40, 12] # x, y centred on the origin: x [-10, 10], y [-20, 20]; z [ground_height, ground_height + 12] = [-8.5, 3.5]
-local_update_range: [6, 6, 6]
+local_update_range: [20, 20, 12] # map everything the lidar returns within raycast_max_length; a small box clips scans to a rectangle
 local_bound_inflation: 2.0 # inflate local bound in meter
 clean_local_map: false
 

@@ -14,12 +14,28 @@
 	<rosparam file="$(find autonomous_flight)/cfg/dynamic_exploration/dynamic_detector_param.yaml" ns="/onboard_detector" />
 	<rosparam file="$(find autonomous_flight)/cfg/dynamic_exploration/mapping_param.yaml" ns="/dynamic_map" />
 
+	<!-- Which pit: excavation1, excavation_long or excavation_slab. Start the matching sim: start_<map>.launch -->
+	<arg name="map" default="excavation1"/>
+	<rosparam file="$(find autonomous_flight)/cfg/dynamic_exploration/maps/$(arg map).yaml"/>
+	<rosparam file="$(find autonomous_flight)/cfg/dynamic_exploration/maps/$(arg map)_mapping.yaml" ns="/dynamic_map"/>
+
+	<!-- Which method to fly, loaded over the configs above: baseline, gain or tour. Runs on another map are named map_preset -->
+	<arg name="preset" default="gain"/>
+	<rosparam file="$(find autonomous_flight)/cfg/dynamic_exploration/presets/$(arg preset).yaml"/>
+	<param name="autonomous_flight/preset" value="$(eval arg('preset') if arg('map') == 'excavation1' else arg('map') + '_' + arg('preset'))"/>
+
 	<node pkg="autonomous_flight" type="throttle_topics.sh" name="throttle_topics" />
+
+	<!-- The dashboard draws the pit wireframe from this -->
+	<arg name="world_sdf" default="$(eval find('uav_simulator') + '/models/' + arg('map') + '/' + ('env_one.sdf' if arg('map') == 'excavation1' else arg('map') + '.sdf'))"/>
+	<param name="autonomous_flight/world_sdf" textfile="$(arg world_sdf)"/>
 
 	<!-- Mission dashboard (needs ros-noetic-rosbridge-suite). gui:=false to skip -->
 	<arg name="gui" default="true"/>
 	<group if="$(arg gui)">
 		<include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
+		<node pkg="autonomous_flight" type="system_monitor.py" name="system_monitor"/>
+		<node pkg="autonomous_flight" type="recording_fixer.py" name="recording_fixer"/>
 		<node pkg="autonomous_flight" type="open_mission_gui.sh" name="open_mission_gui"/>
 	</group>
 

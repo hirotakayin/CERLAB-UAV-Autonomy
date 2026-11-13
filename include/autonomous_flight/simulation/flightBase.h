@@ -52,6 +52,7 @@ namespace AutoFlight{
 		bool poseControl_ = true;
 		std::atomic<bool> targetSet_ {false}; // publish nothing until a real target exists
 		std::atomic<bool> targetPubEnabled_ {true}; // false after landing, or the setpoint would restart the motors
+		int motionGen_ = 0; // bumped when a command replaces the current motion: a rotation in progress then stops and its caller gives up
 		bool odomReceived_ = false;
 		bool hasTakeoff_ = false;
 		bool firstGoal_ = false;

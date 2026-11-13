@@ -16,10 +16,15 @@
 
 	<node pkg="autonomous_flight" type="throttle_topics.sh" name="throttle_topics" />
 
+	<!-- The dashboard draws the pit wireframe from this -->
+	<param name="autonomous_flight/world_sdf" textfile="$(find uav_simulator)/models/excavation_simple/excavation_simple.sdf"/>
+
 	<!-- Mission dashboard (needs ros-noetic-rosbridge-suite). gui:=false to skip -->
 	<arg name="gui" default="true"/>
 	<group if="$(arg gui)">
 		<include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
+		<node pkg="autonomous_flight" type="system_monitor.py" name="system_monitor"/>
+		<node pkg="autonomous_flight" type="recording_fixer.py" name="recording_fixer"/>
 		<node pkg="autonomous_flight" type="open_mission_gui.sh" name="open_mission_gui"/>
 	</group>
 
