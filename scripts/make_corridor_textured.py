@@ -235,6 +235,14 @@ def main():
         name = child.get('name') or ''
         if child.tag == 'state' or (child.tag == 'model' and (name == 'corridor' or name.startswith('box_'))):
             world.remove(child)
+    # the people: give each a body you can see and hit (their only collision was a 2 cm plate at their feet, so ray
+    # sensors and the drone went straight through them). Size as in their names: 0.5 x 0.5 x 1.8 m
+    for person in [x for x in world.findall('model') if (x.get('name') or '').startswith('person')]:
+        link = person.find('link')
+        if link.find("collision[@name='body']") is None:
+            col = ET.SubElement(link, 'collision', name='body')
+            ET.SubElement(col, 'pose').text = '0 0 0.9 0 0 0'
+            ET.SubElement(ET.SubElement(ET.SubElement(col, 'geometry'), 'box'), 'size').text = '0.5 0.5 1.8'
     inc = ET.SubElement(world, 'include'); ET.SubElement(inc, 'uri').text = 'model://corridor_textured'
     ET.SubElement(inc, 'pose').text = '0 0 0 0 0 0'
     out_dir = os.path.join(SIM, 'worlds', 'corridor_textured'); os.makedirs(out_dir, exist_ok=True)
