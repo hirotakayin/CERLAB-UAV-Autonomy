@@ -1,0 +1,58 @@
+<launch>
+  <!-- detection_arena: open textured arena with one moving or static target (scripts/make_detection_arena.py); world_file:=<target>_<heading>.world -->
+  <arg name="paused" value="false"/>
+  <arg name="verbose" value="false"/>
+  <arg name="use_sim_time" value="true"/>
+  <arg name="debug" value="false" />
+  <arg name="lidar" default="true" />
+  <arg name="gui" default="true" />
+
+  <arg name="world_file" default="person_cross.world" />
+  <arg name="world_name" value="$(find uav_simulator)/worlds/detection_arena/$(arg world_file)" />
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch" >
+        <arg name="paused" value="$(arg paused)"/>
+        <arg name="world_name" value="$(arg world_name)"/>
+        <arg name="verbose" value="$(arg verbose)"/>
+        <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+        <arg name="debug" value="$(arg debug)" />
+        <arg name="gui" value="$(arg gui)" />
+  </include>
+
+  <!-- lidar:=true spawns the drone with the tilted Mid-360 (quadcopter_lidar.urdf) as well as the depth camera -->
+  <!-- sensor:=omni swaps the Mid-360 for the ideal 360 depth sensor (opti360): quadcopter_omni.urdf, raw points on
+       /omni/cloud_raw, and flow_limited_cloud.py publishing what optic flow could range on /omni/cloud_flow -->
+  <arg name="sensor" default="lidar" />
+  <arg name="flow_range_s" default="10.0" />
+  <!-- cameras:=true (with sensor:=omni) also renders the two fisheye images, /insta360/front|back/image_raw -->
+  <arg name="cameras" default="false" />
+  <!-- sensor:=omni_lidar carries both: the tilted Mid-360 and the 360 camera -->
+  <arg name="omni_urdf" value="$(eval 'quadcopter_' + ('omni_lidar' if arg('sensor') == 'omni_lidar' else 'omni') + ('_cam' if arg('cameras') else '') + '.urdf')" />
+  <group if="$(eval arg('lidar') and arg('sensor') == 'lidar')">
+    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter_lidar.urdf'" />
+  </group>
+  <group if="$(eval arg('sensor') in ('omni', 'omni_lidar'))">
+    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/$(arg omni_urdf)'" />
+    <node pkg="uav_simulator" type="flow_limited_cloud.py" name="flow_limited_cloud">
+      <param name="flow_range_s" value="$(arg flow_range_s)" />
+    </node>
+  </group>
+  <group if="$(eval not arg('lidar') and arg('sensor') == 'lidar')">
+    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter.urdf'" />
+  </group>
+
+  <node pkg="topic_tools" type="throttle" name="gt_pose_throttle" args="messages /CERLAB/quadcopter/pose_raw 30 /CERLAB/quadcopter/pose"/>
+  <node pkg="topic_tools" type="throttle" name="gt_vel_throttle" args="messages /CERLAB/quadcopter/vel_raw 30 /CERLAB/quadcopter/vel"/>
+  <node pkg="topic_tools" type="throttle" name="gt_acc_throttle" args="messages /CERLAB/quadcopter/acc_raw 30 /CERLAB/quadcopter/acc"/>
+  <node pkg="topic_tools" type="throttle" name="gt_odom_throttle" args="messages /CERLAB/quadcopter/odom_raw 30 /CERLAB/quadcopter/odom"/>
+
+  <node name="spawn_gazebo_model" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model quadcopter -x 0.0 -y 0.0 -z 0.1 -Y 0.0" respawn="false" />
+
+  <include file="$(find uav_simulator)/launch/setupTF.launch" >
+    <arg name="pose_topic" value="/CERLAB/quadcopter/pose" />
+  </include>
+
+  <arg name="keyboard" default="true" />
+  <node if="$(arg keyboard)" name="keyboard_control" pkg="uav_simulator" type="keyboard_control" />
+
+  </launch>
