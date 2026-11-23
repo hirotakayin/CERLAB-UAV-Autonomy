@@ -73,12 +73,12 @@
    <!-- send robot urdf to param server -->
   <!-- If "use_lidar" is true, use the lidar URDF -->
   <group if="$(arg lidar)">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter_lidar.urdf'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter_lidar.urdf'" />
   </group>
 
   <!-- If "use_lidar" is false, use the standard URDF -->
   <group unless="$(arg lidar)">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter.urdf'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter.urdf'" />
   </group>
 
   <!-- push robot_description to factory and spawn robot in gazebo at the origin, change x,y,z arguments to spawn in a different position -->

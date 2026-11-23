@@ -22,18 +22,22 @@ import numpy as np
 
 from make_detection_arena import WORLDS, box, capsule, mat
 
+# A layout: the machines' geometry and motion (shared with make_excavation_pit.py and site_motion.py), the static clutter
+# people keep clear of, and where people walk.
 SITE = {
     'excavator': dict(pos=(19.0, 4.0), dig_deg=180.0, dump_deg=270.0, foot=(1.2, 2.2), arm_len=7.5, dig_elev=-16.0, carry_elev=20.0),
     'crane': dict(pos=(4.0, -8.0), radius=6.0, pick_deg=0.0, set_deg=110.0, mast_h=10.0, low=0.3, carry=1.2, slew_rate=0.25),
+    'truck': (19.0, -3.0),   # under the excavator's dump heading
+    'berms': [((6.0, 7.0), (1.5, 8.0)), ((-3.0, -5.0), (4.0, 1.5)), ((24.0, -7.0), (1.5, 8.0))],  # spoil berms (centre, size), 2.6 m: hide what is behind
+    'walk_x': (-4.0, 26.0), 'walk_y': (-10.0, 10.0),   # where people walk
 }
-TRUCK = (19.0, -3.0)   # under the excavator's dump heading
-BERMS = [((6.0, 7.0), (1.5, 8.0)), ((-3.0, -5.0), (4.0, 1.5)), ((24.0, -7.0), (1.5, 8.0))]  # spoil berms (centre, size), 2.6 m: hide what is behind
+TRUCK, BERMS = SITE['truck'], SITE['berms']
 PEOPLE = ['red', 'yellow', 'blue']
 
 
-def excavator_pose(t):
+def excavator_pose(t, S=SITE):
     """(swing yaw, arm elevation) in rad at time t: a dig-swing-dump-swing cycle of smoothstepped keyframes."""
-    e = SITE['excavator']
+    e = S['excavator']
     d, u = np.radians(e['dig_deg']), np.radians(e['dump_deg'])
     lo, hi = np.radians(e['dig_elev']), np.radians(e['carry_elev'])
     # (duration, yaw at end, elevation at end): start of cycle at the dig, arm low
@@ -54,13 +58,14 @@ def excavator_pose(t):
     return d, lo
 
 
-def crane_pose(t):
+def crane_pose(t, S=SITE):
     """(slew angle rad, load bottom height m) at time t: pick low, lift, slew, lower, set, lift, slew back, lower."""
-    c = SITE['crane']
+    c = S['crane']
     p, q = np.radians(c['pick_deg']), np.radians(c['set_deg'])
     slew = abs(q - p) / c['slew_rate']
-    keys = [(3.0, p, c['low']), (3.0, p, c['carry']), (slew, q, c['carry']), (3.0, q, c['low']),
-            (3.0, q, c['low']), (3.0, q, c['carry']), (slew, p, c['carry']), (3.0, p, c['low'])]
+    lift = max(3.0, abs(c['carry'] - c['low']) / c.get('hoist_rate', 1e9))   # hoisting takes time on a tall crane
+    keys = [(3.0, p, c['low']), (lift, p, c['carry']), (slew, q, c['carry']), (lift, q, c['low']),
+            (3.0, q, c['low']), (lift, q, c['carry']), (slew, p, c['carry']), (lift, p, c['low'])]
     period = sum(k[0] for k in keys)
     s = t % period
     a0, h0 = p, c['low']
@@ -72,17 +77,17 @@ def crane_pose(t):
     return p, c['low']
 
 
-def hazard_capsules(t):
+def hazard_capsules(t, S=SITE):
     """True shapes of the moving machines at time t, as capsules (name, a xyz, b xyz, radius): for scoring clearance."""
-    e, c = SITE['excavator'], SITE['crane']
-    yaw, el = excavator_pose(t)
+    e, c = S['excavator'], S['crane']
+    yaw, el = excavator_pose(t, S)
     E = np.array([*e['pos'], 0.0])
     u = np.array([np.cos(yaw), np.sin(yaw), 0.0])
     foot = E + u * e['foot'][0] + np.array([0, 0, e['foot'][1]])
     arm = np.array([np.cos(el) * u[0], np.cos(el) * u[1], np.sin(el)])
     tip = foot + arm * e['arm_len']
     house = E + np.array([0, 0, 1.6]) - u * 0.4
-    sl, h = crane_pose(t)
+    sl, h = crane_pose(t, S)
     C = np.array([*c['pos'], 0.0])
     load = C + c['radius'] * np.array([np.cos(sl), np.sin(sl), 0.0])
     out = [('excavator_arm', foot, tip, 0.35), ('excavator_bucket', tip, tip, 0.7),
@@ -96,11 +101,11 @@ def _rz(a):
     return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
 
 
-def hazard_boxes(t):
+def hazard_boxes(t, S=SITE):
     """Exact shapes of the moving machines at time t, for scoring clearance: oriented boxes (name, centre, R, half
     extents) as in the world file, and the crane cable as a thin segment (name, a, b, radius)."""
-    e, c = SITE['excavator'], SITE['crane']
-    yaw, el = excavator_pose(t)
+    e, c = S['excavator'], S['crane']
+    yaw, el = excavator_pose(t, S)
     E = np.array([*e['pos'], 0.0]); Rh = _rz(yaw)
     boxes = [('excavator_house', E + Rh @ [-0.4, 0, 1.55], Rh, np.array([1.6, 1.3, 0.55])),
              ('excavator_cab', E + Rh @ [0.7, 0.75, 2.65], Rh, np.array([0.6, 0.5, 0.55]))]
@@ -109,42 +114,62 @@ def hazard_boxes(t):
     L = e['arm_len']
     boxes += [('excavator_boom', foot + Ra @ [(L - 0.6) / 2, 0, 0], Ra, np.array([(L - 0.6) / 2, 0.25, 0.3])),
               ('excavator_bucket', foot + Ra @ [L - 0.3, 0, -0.2], Ra, np.array([0.5, 0.55, 0.45]))]
-    sl, h = crane_pose(t)
+    sl, h = crane_pose(t, S)
     load = np.array([*c['pos'], 0.0]) + c['radius'] * np.array([np.cos(sl), np.sin(sl), 0.0])
     boxes.append(('crane_load', load + [0, 0, h + 0.4], _rz(sl), np.array([0.6, 0.6, 0.4])))
-    cable = ('crane_cable', load + [0, 0, h + 0.8], load + [0, 0, c['mast_h'] - 0.5], 0.03)
+    cable = ('crane_cable', load + [0, 0, h + 0.8], load + [0, 0, c['mast_h'] - (0.0 if c.get('jib') else 0.5)], 0.03)
+    if c.get('jib'):
+        r = c['radius']; Rj = _rz(sl)
+        boxes += [('crane_jib', np.array([*c['pos'], c['mast_h'] + 0.3]) + Rj @ [(r - 1.5) / 2, 0, 0], Rj, np.array([(r + 3.5) / 2, 0.3, 0.3])),
+                  ('crane_counterweight', np.array([*c['pos'], c['mast_h']]) + Rj @ [-2.6, 0, 0], Rj, np.array([0.8, 0.6, 0.5]))]
     return boxes, [cable]
 
 
-def in_hazard_area(p, pad=1.2):
-    """Inside the excavator's swing sector or the crane's slewing arc (padded): where people do not walk."""
-    e, c = SITE['excavator'], SITE['crane']
+def in_hazard_area(p, pad=1.2, S=SITE):
+    """Inside the excavator's swing sector or the crane's slewing arc (padded), or near static clutter: where people do
+    not walk."""
+    e, c = S['excavator'], S['crane']
+    def in_sector(a, lo, hi, m):  # a within [lo - m, hi + m] degrees, going counter-clockwise (wraps through 360)
+        return (a - (lo - m)) % 360 <= (hi - lo) + 2 * m
     v = np.asarray(p) - e['pos']; r = np.hypot(*v); a = np.degrees(np.arctan2(v[1], v[0])) % 360
     reach = e['foot'][0] + e['arm_len'] + 0.8
-    if r < 2.5 + pad or (r < reach + pad and e['dig_deg'] - 15 <= a <= e['dump_deg'] + 15): return True
+    if r < 2.5 + pad or (r < reach + pad and in_sector(a, e['dig_deg'], e['dump_deg'], 15)): return True
     v = np.asarray(p) - c['pos']; r = np.hypot(*v); a = np.degrees(np.arctan2(v[1], v[0])) % 360
-    if r < 1.0 + pad or (abs(r - c['radius']) < 1.0 + pad and c['pick_deg'] - 10 <= a <= c['set_deg'] + 10): return True
-    if any(np.all(np.abs(np.asarray(p) - c) < np.asarray(sz) / 2 + pad) for c, sz in BERMS): return True
-    return np.hypot(*(np.asarray(p) - TRUCK)) < 3.5 + pad
+    if r < 1.0 + pad or (abs(r - c['radius']) < 1.0 + pad and in_sector(a, c['pick_deg'], c['set_deg'], 10)): return True
+    if any(np.all(np.abs(np.asarray(p) - c) < np.asarray(sz) / 2 + pad) for c, sz in S['berms'] + S.get('keep_out', [])): return True
+    return np.hypot(*(np.asarray(p) - S['truck'])) < 3.5 + pad
 
 
-def safe_route(rng, start, n=30, x=(-4.0, 26.0), y=(-10.0, 10.0)):
+def safe_route(rng, start, n=30, S=SITE):
+    x, y = S['walk_x'], S['walk_y']
     pts, p, h = [np.array(start, float)], np.array(start, float), rng.uniform(0, 2 * np.pi)
     while len(pts) < n:
         for _ in range(200):
             hh = h + rng.uniform(-np.radians(110), np.radians(110))
             q = p + rng.uniform(3.0, 8.0) * np.array([np.cos(hh), np.sin(hh)])
             if not (x[0] <= q[0] <= x[1] and y[0] <= q[1] <= y[1]): continue
-            if any(in_hazard_area(p + f * (q - p)) for f in np.linspace(0, 1, 20)): continue
+            if any(in_hazard_area(p + f * (q - p), S=S) for f in np.linspace(0, 1, 20)): continue
             p, h = q, hh; pts.append(q); break
         else:
             h += np.pi
     return pts + [pts[0]]
 
 
-def make_site(seed):
-    rng = np.random.default_rng(seed)
-    e, c = SITE['excavator'], SITE['crane']
+def cable_segment_len(c):
+    return (c['mast_h'] - c['low'] - 0.8) / c.get('cable_segments', 6)
+
+
+def cable_segments(c, load_top):
+    """Centre heights of the telescoping cable segments of a tower crane (jib at mast_h) with the load's top at
+    load_top: segment k hangs from mast_h - k * length, pushed up (overlapping the ones above) to stay above the load."""
+    seg = cable_segment_len(c)
+    return [max(c['mast_h'] - (k + 1) * seg, load_top) + seg / 2 for k in range(c.get('cable_segments', 6))]
+
+
+def machine_models(S):
+    """SDF models of the excavator (tracks static; house and arm kinematic), the crane (mast static; load and cable
+    kinematic) and the dump truck, as laid out in S; site_motion.py poses the kinematic ones."""
+    e, c = S['excavator'], S['crane']
     models = []
     # excavator: tracked undercarriage (static), house and arm (kinematic, posed by site_motion.py)
     ex, ey = e['pos']
@@ -165,15 +190,36 @@ def make_site(seed):
                   % (cx, cy, box('mast', (0.8, 0.8, c['mast_h']), (0, 0, c['mast_h'] / 2, 0, 0, 0), 'Corridor/Wall0'),
                      box('pad', (3.0, 3.0, 0.4), (0, 0, 0.2, 0, 0, 0), 'Corridor/Wall1')))
     cable_len = c['mast_h'] - 0.5
-    load = (box('load', (1.2, 1.2, 0.8), (0, 0, 0.4, 0, 0, 0), 'Corridor/Plywood')
-            + '<visual name="cable_v"><pose>0 0 %.3f 0 0 0</pose><geometry><cylinder><radius>0.03</radius><length>%.3f</length></cylinder></geometry></visual>'
+    load = box('load', (1.2, 1.2, 0.8), (0, 0, 0.4, 0, 0, 0), 'Corridor/Plywood')
+    if not c.get('jib'): load += ('<visual name="cable_v"><pose>0 0 %.3f 0 0 0</pose><geometry><cylinder><radius>0.03</radius><length>%.3f</length></cylinder></geometry></visual>'
               '<collision name="cable_c"><pose>0 0 %.3f 0 0 0</pose><geometry><cylinder><radius>0.03</radius><length>%.3f</length></cylinder></geometry></collision>'
             % (0.8 + cable_len / 2, cable_len, 0.8 + cable_len / 2, cable_len))
+    else:   # a tower crane: a slewing jib, and the cable as telescoping segments between it and the load (site_motion.py)
+        r = c['radius']
+        models.append('<model name="crane_jib"><pose>%.2f %.2f %.2f 0 0 %.3f</pose><link name="link"><gravity>false</gravity><kinematic>true</kinematic>%s%s</link></model>'
+                      % (cx, cy, c['mast_h'], np.radians(c['pick_deg']),
+                         box('jib', (r + 3.5, 0.6, 0.6), ((r - 1.5) / 2, 0, 0.3, 0, 0, 0), 'Corridor/Wall5'),
+                         box('counterweight', (1.6, 1.2, 1.0), (-2.6, 0, 0.0, 0, 0, 0), 'Corridor/Wall0')))
+        seg = cable_segment_len(c)
+        for k in range(c.get('cable_segments', 6)):
+            models.append('<model name="crane_cable_%d"><pose>%.2f %.2f %.2f 0 0 0</pose><link name="link"><gravity>false</gravity><kinematic>true</kinematic>'
+                          '<visual name="v"><geometry><cylinder><radius>0.03</radius><length>%.3f</length></cylinder></geometry></visual>'
+                          '<collision name="c"><geometry><cylinder><radius>0.03</radius><length>%.3f</length></cylinder></geometry></collision></link></model>'
+                          % (k, cx + r, cy, c['mast_h'] - (k + 0.5) * seg, seg, seg))
     models.append('<model name="crane_load"><pose>%.2f %.2f %.2f 0 0 0</pose><link name="link"><gravity>false</gravity><kinematic>true</kinematic>%s</link></model>'
                   % (cx + c['radius'], cy, c['low'], load))
     # static clutter: the dump truck under the dump heading, the cut's spoil pile, material stacks clear of everything
     models.append('<model name="truck"><static>true</static><pose>%.2f %.2f 0 0 0 0</pose><link name="link">%s%s</link></model>'
-                  % (*TRUCK, box('bed', (2.6, 5.0, 1.6), (0, 0.5, 1.3, 0, 0, 0), 'Corridor/Wall3'), box('cabin', (2.4, 1.6, 2.4), (0, -2.9, 1.2, 0, 0, 0), 'Corridor/Wall5')))
+                  % (*S['truck'], box('bed', (2.6, 5.0, 1.6), (0, 0.5, 1.3, 0, 0, 0), 'Corridor/Wall3'), box('cabin', (2.4, 1.6, 2.4), (0, -2.9, 1.2, 0, 0, 0), 'Corridor/Wall5')))
+    return models
+
+
+def make_site(seed):
+    rng = np.random.default_rng(seed)
+    e, c = SITE['excavator'], SITE['crane']
+    models = []
+    models += machine_models(SITE)
+    L = e['arm_len']
     dig = np.array(e['pos']) + (e['foot'][0] + L * np.cos(np.radians(e['dig_elev'])) + 1.6) * np.array([np.cos(np.radians(e['dig_deg'])), np.sin(np.radians(e['dig_deg']))])
     models.append('<model name="spoil"><static>true</static><pose>%.2f %.2f 0 0 0 0.4</pose><link name="link">%s</link></model>'
                   % (dig[0], dig[1] + 2.5, box('pile', (2.5, 2.0, 0.9), (0, 0, 0.45, 0, 0, 0), 'Corridor/Floor1')))

@@ -26,19 +26,21 @@
   <arg name="flow_range_s" default="10.0" />
   <!-- cameras:=true (with sensor:=omni) also renders the two fisheye images, /insta360/front|back/image_raw -->
   <arg name="cameras" default="false" />
+  <!-- the Mid-360's nose-down tilt in degrees (URDF and TF; 23.5 on the real drone) -->
+  <arg name="lidar_pitch_deg" default="23.5" />
   <!-- sensor:=omni_lidar carries both: the tilted Mid-360 and the 360 camera -->
   <arg name="omni_urdf" value="$(eval 'quadcopter_' + ('omni_lidar' if arg('sensor') == 'omni_lidar' else 'omni') + ('_cam' if arg('cameras') else '') + '.urdf')" />
   <group if="$(eval arg('lidar') and arg('sensor') == 'lidar')">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter_lidar.urdf'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter_lidar.urdf' lidar_pitch_deg:=$(arg lidar_pitch_deg)" />
   </group>
   <group if="$(eval arg('sensor') in ('omni', 'omni_lidar'))">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/$(arg omni_urdf)'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/$(arg omni_urdf)' lidar_pitch_deg:=$(arg lidar_pitch_deg)" />
     <node pkg="uav_simulator" type="flow_limited_cloud.py" name="flow_limited_cloud">
       <param name="flow_range_s" value="$(arg flow_range_s)" />
     </node>
   </group>
   <group if="$(eval not arg('lidar') and arg('sensor') == 'lidar')">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter.urdf'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter.urdf'" />
   </group>
 
   <node pkg="topic_tools" type="throttle" name="gt_pose_throttle" args="messages /CERLAB/quadcopter/pose_raw 30 /CERLAB/quadcopter/pose"/>
@@ -46,10 +48,16 @@
   <node pkg="topic_tools" type="throttle" name="gt_acc_throttle" args="messages /CERLAB/quadcopter/acc_raw 30 /CERLAB/quadcopter/acc"/>
   <node pkg="topic_tools" type="throttle" name="gt_odom_throttle" args="messages /CERLAB/quadcopter/odom_raw 30 /CERLAB/quadcopter/odom"/>
 
-  <node name="spawn_gazebo_model" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model quadcopter -x 0.0 -y 0.0 -z 0.1 -Y 0.0" respawn="false" />
+  <!-- where the drone starts (make_excavation_pit.py: on the deck at the rim, -4.5 0 9.1) -->
+  <arg name="spawn_x" default="0.0" />
+  <arg name="spawn_y" default="0.0" />
+  <arg name="spawn_z" default="0.1" />
+  <arg name="spawn_yaw" default="0.0" />
+  <node name="spawn_gazebo_model" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model quadcopter -x $(arg spawn_x) -y $(arg spawn_y) -z $(arg spawn_z) -Y $(arg spawn_yaw)" respawn="false" />
 
   <include file="$(find uav_simulator)/launch/setupTF.launch" >
     <arg name="pose_topic" value="/CERLAB/quadcopter/pose" />
+    <arg name="lidar_pitch_deg" value="$(arg lidar_pitch_deg)" />
   </include>
 
   <arg name="keyboard" default="true" />

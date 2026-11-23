@@ -31,16 +31,16 @@
   <!-- sensor:=omni_lidar carries both: the tilted Mid-360 and the 360 camera -->
   <arg name="omni_urdf" value="$(eval 'quadcopter_' + ('omni_lidar' if arg('sensor') == 'omni_lidar' else 'omni') + ('_cam' if arg('cameras') else '') + '.urdf')" />
   <group if="$(eval arg('lidar') and arg('sensor') == 'lidar')">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter_lidar.urdf'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter_lidar.urdf'" />
   </group>
   <group if="$(eval arg('sensor') in ('omni', 'omni_lidar'))">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/$(arg omni_urdf)'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/$(arg omni_urdf)'" />
     <node pkg="uav_simulator" type="flow_limited_cloud.py" name="flow_limited_cloud">
       <param name="flow_range_s" value="$(arg flow_range_s)" />
     </node>
   </group>
   <group if="$(eval not arg('lidar') and arg('sensor') == 'lidar')">
-    <param name="robot_description" command="cat '$(find uav_simulator)/urdf/quadcopter.urdf'" />
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter.urdf'" />
   </group>
 
   <node pkg="topic_tools" type="throttle" name="gt_pose_throttle" args="messages /CERLAB/quadcopter/pose_raw 30 /CERLAB/quadcopter/pose"/>
