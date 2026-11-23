@@ -1,0 +1,438 @@
+{
+  "_doc": "CERLAB UAV Mission Control setup. Each task is a process the window starts and stops; 'cmd' runs after sourcing 'setup', with 'env' applied (\"\" unsets; the sim always uses a local ROS master, whatever ~/.bashrc says). In the simulator cmd, {world} {drone} {x} {y} {z} {gui} {pitch} come from the Simulator section. 'hidden' tasks run but have no button; 'auto' tasks start with the first other task of their tab. Recording variants carry a 'size' label for the dropdown. Edit and restart the server.",
+  "storage": {
+    "root": "~/mission_control_data",
+    "log_budget_mb": 300,
+    "log_file_cap_mb": 5,
+    "min_free_gb": 5,
+    "bag_split_mb": 1024
+  },
+  "sim": {
+    "label": "Simulation",
+    "setup": "~/catkin_ws/devel/setup.bash",
+    "env": {
+      "ROS_MASTER_URI": "http://localhost:11311",
+      "ROS_HOSTNAME": "localhost",
+      "ROS_IP": ""
+    },
+    "viz": {
+      "ws": "ws://localhost:9090",
+      "pose": "/CERLAB/quadcopter/pose",
+      "map": "/dynamic_map/voxel_map",
+      "path": "/dynamicExploration/bspline_trajectory",
+      "colored_map": "/reconstruction/cloud"
+    },
+    "default_world": "excavation_long/excavation_long.world",
+    "default_drone": "quadcopter_cerlab_lidar_cad.urdf",
+    "spawn": {
+      "excavation_long": [
+        10.0,
+        2.0,
+        0.2
+      ],
+      "excavation_simple": [
+        3.0,
+        2.0,
+        0.2
+      ],
+      "excavation_slab": [
+        5.0,
+        2.0,
+        0.2
+      ],
+      "excavation1": [
+        6.0,
+        2.0,
+        0.2
+      ]
+    },
+    "drones": {
+      "quadcopter_cerlab_lidar_cad.urdf": {
+        "label": "CERLAB LiDAR drone",
+        "note": "From CAD: Mid-360 on an adjustable front hinge"
+      },
+      "quadcopter.urdf": {
+        "label": "Depth camera",
+        "note": "Forward RGB-D only"
+      },
+      "quadcopter_lidar.urdf": {
+        "label": "Tilted LiDAR",
+        "note": "Mid-360 pitched 23.5°, forward RGB-D"
+      },
+      "quadcopter_omni_lidar_cam.urdf": {
+        "label": "LiDAR + 360 camera",
+        "note": "Tilted Mid-360 and dual fisheye"
+      },
+      "quadcopter_omni.urdf": {
+        "label": "Ideal 360 depth",
+        "note": "Research: perfect 360° range sensor"
+      },
+      "quadcopter_omni_cam.urdf": {
+        "label": "360 camera",
+        "note": "Research: dual fisheye with ideal 360° depth"
+      },
+      "quadcopter_omni_lidar.urdf": {
+        "label": "LiDAR + ideal 360 depth",
+        "note": "Research: for scoring camera depth"
+      }
+    },
+    "tasks": [
+      {
+        "id": "core",
+        "label": "ROS master",
+        "hidden": true,
+        "cmd": "roscore"
+      },
+      {
+        "id": "sim",
+        "label": "Simulator",
+        "choose": true,
+        "cmd": "roslaunch uav_simulator start_world.launch world:={world} drone:={drone} spawn_x:={x} spawn_y:={y} spawn_z:={z} gui:={gui} lidar_pitch_deg:={pitch}"
+      },
+      {
+        "id": "link",
+        "label": "Live view",
+        "hidden": true,
+        "auto": true,
+        "cmd": "roslaunch rosbridge_server rosbridge_websocket.launch"
+      },
+      {
+        "id": "mission",
+        "label": "Mission",
+        "needs": [
+          "sim"
+        ],
+        "variants": [
+          {
+            "label": "Exploration",
+            "dir": "dynamic_exploration",
+            "cmd": "roslaunch autonomous_flight dynamic_exploration.launch gui:=false map:={map} overrides:={overrides}"
+          },
+          {
+            "label": "Navigation",
+            "dir": "dynamic_navigation",
+            "cmd": "roslaunch autonomous_flight dynamic_navigation.launch overrides:={overrides}"
+          },
+          {
+            "label": "Inspection",
+            "dir": "dynamic_inspection",
+            "cmd": "roslaunch autonomous_flight dynamic_inspection.launch overrides:={overrides}"
+          },
+          {
+            "label": "Manual",
+            "manual": true,
+            "cmd": "",
+            "detail": "keyboard, from this window"
+          }
+        ]
+      },
+      {
+        "id": "rviz",
+        "label": "RViz",
+        "hidden": true,
+        "cmd": "roslaunch remote_control exploration_rviz.launch"
+      },
+      {
+        "id": "record_mission",
+        "label": "Record mission",
+        "record": true,
+        "section": "mission",
+        "variants": [
+          {
+            "label": "Small",
+            "size": "status and paths · ~1 MB/min",
+            "topics": [
+              "/exploration/status",
+              "/dynamicExploration/bspline_trajectory",
+              "/CERLAB/quadcopter/pose",
+              "/rosout_agg"
+            ]
+          },
+          {
+            "label": "Medium",
+            "size": "+ map · ~30 MB/min",
+            "topics": [
+              "/exploration/status",
+              "/dynamicExploration/bspline_trajectory",
+              "/CERLAB/quadcopter/pose",
+              "/rosout_agg",
+              "/dynamic_map/voxel_map"
+            ]
+          },
+          {
+            "label": "Large",
+            "size": "+ planner internals · ~100 MB/min",
+            "topics": [
+              "/exploration/status",
+              "/dynamicExploration/bspline_trajectory",
+              "/CERLAB/quadcopter/pose",
+              "/rosout_agg",
+              "/dynamic_map/voxel_map",
+              "/dep/roadmap",
+              "/dep/candidate_paths",
+              "/dep/best_paths",
+              "/dep/frontier_regions"
+            ]
+          }
+        ]
+      }
+    ],
+    "planner_cfg": "~/catkin_ws/src/CERLAB-UAV-Autonomy/autonomous_flight/cfg",
+    "world_notes": {
+      "excavation1": {
+        "typical_s": [
+          77,
+          135
+        ],
+        "source": "EPIC / HIRE3D to 90% (Nov 9 runs)",
+        "kind": "Open pit, columns and struts"
+      },
+      "excavation_long": {
+        "typical_s": [
+          122,
+          240
+        ],
+        "source": "EPIC / HIRE3D to 90% (Nov 9 runs)",
+        "kind": "Retaining-wall maze"
+      },
+      "excavation_slab": {
+        "typical_s": [
+          81,
+          229
+        ],
+        "source": "EPIC / HIRE3D to 90% (Nov 9 runs)",
+        "kind": "Partial top cover"
+      }
+    }
+  },
+  "drone": {
+    "label": "Drone",
+    "host": "cerlab@192.168.0.252",
+    "setup": "~/catkin_ws/devel/setup.bash",
+    "bag_dir": "~/bags",
+    "env": {
+      "ROS_MASTER_URI": "http://192.168.0.252:11311"
+    },
+    "viz": {
+      "ws": "ws://192.168.0.252:9090",
+      "pose": "/mavros/local_position/pose",
+      "map": "/dynamic_map/voxel_map",
+      "path": "/dynamicExploration/bspline_trajectory",
+      "colored_map": "/reconstruction/cloud"
+    },
+    "tasks": [
+      {
+        "id": "localization",
+        "label": "Localization",
+        "detail": "State estimation",
+        "section": "vehicle",
+        "cmd": ""
+      },
+      {
+        "id": "sensors",
+        "label": "Sensors",
+        "detail": "LiDAR and cameras",
+        "section": "vehicle",
+        "cmd": ""
+      },
+      {
+        "id": "link",
+        "label": "Live view",
+        "hidden": true,
+        "auto": true,
+        "cmd": "roslaunch rosbridge_server rosbridge_websocket.launch"
+      },
+      {
+        "id": "mission",
+        "label": "Mission",
+        "needs": [
+          "localization",
+          "sensors"
+        ],
+        "variants": [
+          {
+            "label": "Exploration",
+            "cmd": "roslaunch autonomous_flight dynamic_exploration.launch gui:=false"
+          },
+          {
+            "label": "Navigation",
+            "cmd": "roslaunch autonomous_flight dynamic_navigation.launch"
+          },
+          {
+            "label": "Inspection",
+            "cmd": "roslaunch autonomous_flight dynamic_inspection.launch"
+          }
+        ]
+      },
+      {
+        "id": "rviz",
+        "label": "RViz",
+        "hidden": true,
+        "local": true,
+        "cmd": "roslaunch remote_control exploration_rviz.launch"
+      },
+      {
+        "id": "record_vehicle",
+        "label": "Record drone",
+        "record": true,
+        "section": "vehicle",
+        "variants": [
+          {
+            "label": "Small",
+            "size": "pose and state · ~1 MB/min",
+            "topics": [
+              "/mavros/local_position/pose",
+              "/mavros/local_position/odom",
+              "/mavros/state",
+              "/tf",
+              "/tf_static"
+            ]
+          },
+          {
+            "label": "Large",
+            "size": "all sensors, no raw images · ~1 GB/min",
+            "topics": [
+              "-a",
+              "-x",
+              ".*image_raw$|.*image_raw/(theora|compressedDepth).*"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "record_mission",
+        "label": "Record mission",
+        "record": true,
+        "section": "mission",
+        "variants": [
+          {
+            "label": "Small",
+            "size": "status and paths · ~1 MB/min",
+            "topics": [
+              "/exploration/status",
+              "/dynamicExploration/bspline_trajectory",
+              "/mavros/local_position/pose",
+              "/rosout_agg"
+            ]
+          },
+          {
+            "label": "Medium",
+            "size": "+ map · ~30 MB/min",
+            "topics": [
+              "/exploration/status",
+              "/dynamicExploration/bspline_trajectory",
+              "/mavros/local_position/pose",
+              "/rosout_agg",
+              "/dynamic_map/voxel_map"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "settings": [
+    {
+      "key": "autonomous_flight/takeoff_height",
+      "label": "Takeoff height",
+      "unit": "m",
+      "file": "flight_base.yaml",
+      "path": "takeoff_height",
+      "min": 0.3,
+      "max": 5,
+      "step": 0.1
+    },
+    {
+      "key": "autonomous_flight/desired_velocity",
+      "label": "Flight speed",
+      "unit": "m/s",
+      "file": "flight_base.yaml",
+      "path": "desired_velocity",
+      "min": 0.2,
+      "max": 4,
+      "step": 0.1
+    },
+    {
+      "key": "autonomous_flight/desired_acceleration",
+      "label": "Acceleration",
+      "unit": "m/s²",
+      "file": "flight_base.yaml",
+      "path": "desired_acceleration",
+      "min": 0.2,
+      "max": 4,
+      "step": 0.1
+    },
+    {
+      "key": "autonomous_flight/desired_angular_velocity",
+      "label": "Yaw speed",
+      "unit": "rad/s",
+      "file": "flight_base.yaml",
+      "path": "desired_angular_velocity",
+      "min": 0.2,
+      "max": 4,
+      "step": 0.1
+    },
+    {
+      "key": "autonomous_flight/reach_goal_distance",
+      "label": "Goal reached within",
+      "unit": "m",
+      "file": "flight_base.yaml",
+      "path": "reach_goal_distance",
+      "min": 0.05,
+      "max": 1,
+      "step": 0.05
+    },
+    {
+      "key": "dynamic_map/raycast_max_length",
+      "label": "Trusted sensor range",
+      "unit": "m",
+      "file": "mapping_param.yaml",
+      "path": "raycast_max_length",
+      "min": 3,
+      "max": 40,
+      "step": 1,
+      "note": "map is built from returns closer than this"
+    },
+    {
+      "key": "DEP/dmax",
+      "label": "Information-gain range",
+      "unit": "m",
+      "file": "exploration_param.yaml",
+      "path": "dmax",
+      "min": 2,
+      "max": 20,
+      "step": 0.5,
+      "note": "how far a viewpoint is credited with seeing"
+    },
+    {
+      "key": "DEP/safe_distance_xy",
+      "label": "Clearance from obstacles",
+      "unit": "m",
+      "file": "exploration_param.yaml",
+      "path": "safe_distance_xy",
+      "min": 0.1,
+      "max": 1.5,
+      "step": 0.05
+    },
+    {
+      "key": "DEP/tour_enabled",
+      "label": "Tour planning",
+      "type": "bool",
+      "file": "exploration_param.yaml",
+      "path": "tour_enabled"
+    },
+    {
+      "key": "DEP/static_environment",
+      "label": "Static environment",
+      "type": "bool",
+      "file": "exploration_param.yaml",
+      "path": "static_environment"
+    },
+    {
+      "key": "_bspline_seed",
+      "label": "Trajectory",
+      "type": "info",
+      "value": "B-spline from a piecewise-linear seed",
+      "note": "the polynomial seed is commented out in dynamicExploration.cpp, so this is the only generator wired in"
+    }
+  ]
+}

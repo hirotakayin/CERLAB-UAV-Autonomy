@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CERLAB UAV Mission Control</title>
+<link rel="stylesheet" href="vendor/xterm.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- walk-signal pedestrian: worlds with moving obstacles -->
+  <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13.5" cy="3.6" r="2.1" fill="currentColor" stroke="none"/>
+    <path d="M12.6 7.2l-2.4 5.3 2.6 2.1-1.2 6.4M12.6 7.2l1.6 5.6 3.4 1.6M10.2 12.5L7 14.2M12.8 14.6l3 1.6 1.4 4.8"/></symbol>
+  <symbol id="i-still" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-explore" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></symbol>
+  <symbol id="i-nav" viewBox="0 0 24 24"><path d="M5 19c3-6 5-2 7-7s4-5 7-7"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/></symbol>
+  <symbol id="i-inspect" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+  <symbol id="i-keys" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></symbol>
+</svg>
+
+<header class="top">
+  <div class="brand"><span class="mark"></span><b>CERLAB</b>&nbsp;UAV Mission Control</div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-group="sim">Simulation</button>
+    <button role="tab" data-group="drone">Drone</button>
+  </nav>
+  <div class="status">
+    <span class="pill" id="pillView" title="Live view"><i></i>Live</span>
+    <span class="pill" id="pillDrone" title="Drone link" hidden><i></i>Link</span>
+    <span class="pill quiet" id="pillDisk" title="Laptop storage">—</span>
+    <button class="icon" id="tglLeft" title="Controls  [">
+      <svg viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><line x1="7.5" y1="3.5" x2="7.5" y2="16.5"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="shell" id="shell">
+  <aside class="left" id="left">
+
+    <!-- ===== Simulation ===== -->
+    <div class="pane" data-pane="sim">
+      <section class="sect fold" data-step="map">
+        <button class="sect-head">
+          <span class="num">1</span>
+          <span class="sect-titles"><span class="sect-title">Map</span><span class="sect-sub" id="mapSub">—</span></span>
+          <svg class="chev"><use href="#i-down"/></svg>
+        </button>
+        <div class="sect-body">
+          <div class="gallery worlds" id="worldGallery"></div>
+          <div class="chips" id="worldVariants"></div>
+        </div>
+      </section>
+
+      <section class="sect fold" data-step="drone">
+        <button class="sect-head">
+          <span class="num">2</span>
+          <span class="sect-titles"><span class="sect-title">Drone</span><span class="sect-sub" id="droneSub">—</span></span>
+          <svg class="chev"><use href="#i-down"/></svg>
+        </button>
+        <div class="sect-body">
+          <div class="gallery drones" id="droneGallery"></div>
+          <div class="field" id="tiltField">
+            <label for="tiltInput">LiDAR tilt</label>
+            <div class="tilt-ctl"><input type="range" id="tiltRange" min="-10" max="45" step="0.5"><input type="number" id="tiltInput" min="-10" max="45" step="0.5"><span>°</span></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="rvizWindow"><span></span>RViz window</label>
+          <details class="settings" id="settingsBox">
+            <summary>Flight settings <span class="sub" id="settingsNote"></span></summary>
+            <div class="settings-body" id="settingsBody"></div>
+          </details>
+        </div>
+      </section>
+
+      <section class="sect fold mission" data-step="mission" data-group="sim">
+        <div class="sect-head">
+          <button class="sect-toggle"><span class="num">3</span>
+            <span class="sect-titles"><span class="sect-title">Mission</span><span class="sect-sub mission-sub">—</span></span></button>
+          <div class="rec" data-rec="record_mission"></div>
+          <button class="sect-toggle chev-btn"><svg class="chev"><use href="#i-down"/></svg></button>
+        </div>
+        <div class="sect-body">
+          <div class="seg modes"></div>
+          <button class="cta mission-go">Launch live view</button>
+          <div class="flight">
+            <button data-cmd="start">Start</button><button data-cmd="pause">Pause</button>
+            <button data-cmd="return_home">Home</button><button data-cmd="land">Land</button>
+          </div>
+          <div class="keys-help" hidden>
+            <b>Keyboard</b> T take off · G land · W/S forward/back · A/D left/right · Q/E turn · R/F up/down
+          </div>
+          <button class="kill">Force quit planner</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Drone ===== -->
+    <div class="pane" data-pane="drone" hidden>
+      <section class="sect">
+        <div class="sect-head static">
+          <span class="sect-titles"><span class="sect-title" id="droneHost">Drone</span><span class="sect-sub" id="droneMsg">Not connected</span></span>
+          <button class="btn" id="btnConnect">Connect</button>
+        </div>
+      </section>
+      <section class="sect">
+        <div class="sect-head static">
+          <span class="sect-titles"><span class="sect-title">Vehicle</span><span class="sect-sub">Runs on the drone, survives WiFi drops</span></span>
+          <div class="rec" data-rec="record_vehicle"></div>
+        </div>
+        <ul class="rows" id="vehicleRows"></ul>
+      </section>
+      <section class="sect mission" data-group="drone">
+        <div class="sect-head static">
+          <span class="sect-titles"><span class="sect-title">Mission</span><span class="sect-sub mission-sub">—</span></span>
+          <div class="rec" data-rec="record_mission"></div>
+        </div>
+        <div class="sect-body">
+          <div class="seg modes"></div>
+          <button class="cta mission-go">Launch planner</button>
+          <div class="flight">
+            <button data-cmd="start">Start</button><button data-cmd="pause">Pause</button>
+            <button data-cmd="return_home">Home</button><button data-cmd="land">Land</button>
+          </div>
+          <button class="kill">Force quit planner</button>
+        </div>
+      </section>
+    </div>
+  </aside>
+  <div class="resizer" id="resizer" title="Drag to resize"></div>
+
+  <main class="stage" id="stage">
+    <div id="view"></div>
+    <div class="vignette"></div>
+    <svg class="annot" id="annot"></svg>
+    <div class="annot-labels" id="annotLabels"></div>
+
+    <nav class="steps" id="steps">
+      <button data-step="map">Map</button><i></i><button data-step="drone">Drone</button><i></i>
+      <button data-step="mission">Mission</button><i></i><button data-step="live">Live</button>
+    </nav>
+
+    <aside class="info" id="info"></aside>
+
+    <button class="nav prev" id="prevBtn" title="Previous"><svg><use href="#i-chev"/></svg></button>
+    <button class="nav next" id="nextBtn" title="Next"><svg><use href="#i-chev"/></svg></button>
+
+    <div class="choices" id="missionCards" hidden></div>
+
+    <div class="viewtools">
+      <button class="icon glass" id="btnFollow" title="Follow drone">
+        <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg>
+      </button>
+      <button class="icon glass" id="btnLayers" title="Layers">
+        <svg viewBox="0 0 20 20"><path d="M10 3l7 4-7 4-7-4z"/><path d="M3 11l7 4 7-4"/></svg>
+      </button>
+      <div class="layers" id="layers" hidden>
+        <div class="lh">Show</div>
+        <label><input type="checkbox" data-layer="world" checked> World wireframe</label>
+        <label><input type="checkbox" data-layer="map" checked> Mapped points</label>
+        <div class="seg small inset" id="colorMode"><button data-mode="mono">Mono</button><button data-mode="height">Height</button></div>
+        <label title="Coloured points from the 360 camera, when the drone publishes them"><input type="checkbox" data-layer="reality"> Reality view <span class="soon" id="realityNote">no colour data yet</span></label>
+        <label><input type="checkbox" data-layer="trail" checked> Flight trail</label>
+        <label><input type="checkbox" data-layer="path" checked> Planned path</label>
+        <label><input type="checkbox" data-layer="fov" checked> LiDAR coverage</label>
+      </div>
+    </div>
+
+    <div class="cta-wrap" id="ctaWrap">
+      <button class="pill-cta" id="stepCta">Choose drone</button>
+      <div class="flightbar" id="flightBar" hidden>
+        <button data-cmd="start">Start</button><button data-cmd="pause">Pause</button>
+        <button data-cmd="return_home">Home</button><button data-cmd="land">Land</button>
+        <span class="sep"></span><button data-cmd="end" class="end">End session</button>
+      </div>
+      <div class="flightbar" id="manualBar" hidden>
+        <button data-key="t">Take off</button><button data-key="g">Land</button>
+        <span class="hint">W A S D move · Q E turn · R F up/down</span>
+        <span class="sep"></span><button data-cmd="end" class="end">End session</button>
+      </div>
+    </div>
+
+    <!-- bottom data bar -->
+    <section class="dock" id="dock">
+      <div class="bar">
+        <div class="cell state"><span class="dot" id="stateDot"></span><b id="bState">Idle</b></div>
+        <div class="cell"><span>Time</span><b id="bTime">—</b></div>
+        <div class="cell wide"><span>Explored</span><b id="bExplored">—</b><i class="meter"><i id="mExplored"></i></i></div>
+        <div class="cell wide"><span>Floor</span><b id="bFloor">—</b><i class="meter"><i id="mFloor"></i></i></div>
+        <div class="cell wide"><span>Surfaces</span><b id="bSurface">—</b><i class="meter"><i id="mSurface"></i></i></div>
+        <div class="cell"><span>Height</span><b id="bHeight">—</b></div>
+        <div class="cell"><span>Speed</span><b id="bSpeed">—</b></div>
+        <div class="cell"><span>Path</span><b id="bPath">—</b></div>
+        <button class="expand" id="btnDock" title="Data  L"><svg viewBox="0 0 20 20"><path d="M5 12l5-5 5 5"/></svg></button>
+      </div>
+      <div class="drawer" id="drawer" hidden>
+        <nav class="seg dtabs" id="dtabs">
+          <button data-tab="mission" class="on">Mission</button><button data-tab="topics">Topics</button>
+          <button data-tab="procs">Processes</button><button data-tab="storage">Storage</button>
+        </nav>
+        <div class="dpane" data-tab="mission"><dl class="kv" id="missionKv"></dl></div>
+        <div class="dpane split" data-tab="topics" hidden>
+          <div class="list"><input class="search" id="topicFilter" placeholder="Filter topics"><ul id="topicList"></ul></div>
+          <div class="detail"><div class="detail-head"><b id="echoName">Pick a topic</b><span id="echoRate"></span></div><pre id="echoText" class="mono"></pre></div>
+        </div>
+        <div class="dpane split" data-tab="procs" hidden>
+          <div class="list"><ul id="procList"></ul><button class="btn ghost" id="btnTerm">+ Terminal</button></div>
+          <div class="detail"><div class="detail-head"><b id="procName">Pick a process</b><span id="procMeta"></span></div>
+            <pre id="procLog" class="mono"></pre><div id="termHost" hidden></div></div>
+        </div>
+        <div class="dpane" data-tab="storage" hidden>
+          <div class="storage">
+            <div><div class="big" id="sFree">—</div><div class="sub">free on this laptop</div>
+              <i class="meter wide"><i id="mDisk"></i></i><dl class="kv compact" id="storageKv"></dl></div>
+            <div class="bags-wrap"><div class="sub">Recordings</div><ul class="bags" id="bags"></ul></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/OrbitControls.js"></script>
+<script src="vendor/STLLoader.js"></script>
+<script src="vendor/roslib.min.js"></script>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/xterm-addon-fit.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
