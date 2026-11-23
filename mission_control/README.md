@@ -1,4 +1,4 @@
-# Mission Control
+# CERLAB UAV Mission Control
 
 One window for simulation and real flights. Controls are on the left, the live 3D view fills the rest, and the mission data sits in a bar along the bottom that opens into more detail.
 
@@ -11,13 +11,14 @@ Ctrl-C in that terminal stops the server and every simulation task cleanly. Dron
 ## Using it
 - **Simulation tab:**
   - **Simulator:** pick a world and a drone from the galleries, then press Start. The view connects by itself.
-    - Every file in `uav_simulator/worlds` and `uav_simulator/urdf` appears; worlds with several variants show them as chips.
+    - Every file in `uav_simulator/worlds` appears; worlds with several variants show them as chips.
+    - The drones are the three CERLAB ones in `sim.drones`; the older template URDFs are `hidden` there but stay on disk for scripted tests.
     - Before anything runs, the centre shows the chosen world as a wireframe and the drone where it will start.
     - It all goes through `uav_simulator/launch/start_world.launch world:=... drone:=...`.
   - **Mission:** choose Exploration, Navigation or Inspection, press Launch, then use Start, Pause, Home and Land.
     - Force quit kills the planner at once, without a clean shutdown.
   - **Recording:** each section has a record dot and a size choice (Small, Medium, Large); the list says what each includes.
-- **Drone tab:** press Connect (SSH), start Localization and Sensors, then the mission as in the sim.
+- **Real flight tab:** press Connect (SSH), start Localization and Sensors, then the mission as in the sim.
   - Drone tasks run in `tmux` sessions on the drone, so a WiFi drop never kills a flight.
   - When you reconnect, the window picks up whatever is already running.
 - **Bottom bar:** state, time, explored / floor / surfaces, height, speed and path. Open it (`L`) for:
@@ -27,7 +28,7 @@ Ctrl-C in that terminal stops the server and every simulation task cleanly. Dron
   - **Storage:** disk and recordings.
 - **Stop:** sends Ctrl-C, then SIGTERM after 15 s, then SIGKILL. Recordings close properly.
 - **Show and hide:** `[` hides the controls. The view's top-right buttons switch map colours (Mono, Height, Camera), follow the drone, and toggle layers (world model, map, trail, path, sensor coverage). The window remembers what you left open.
-- **Links:** `?tab=drone` and `?data=topics` (or `mission`, `procs`, `storage`) open the window on that tab.
+- **Links:** `?tab=drone` and `?data=topics` (or `mission`, `procs`, `storage`) open the window on that tab; `?step=drone&drone=<urdf file>` opens on a drone.
 
 ## Setup
 Everything is in `config.json`; restart the server after editing it.
@@ -46,6 +47,9 @@ Everything is in `config.json`; restart the server after editing it.
 - **ROS master:**
   - The sim tab always uses a local ROS master (`env` in the config), whatever `~/.bashrc` says. A drone-network `ROS_MASTER_URI` otherwise makes roslaunch hang off that network.
   - The drone tab uses the drone's master. For laptop RViz on the drone network, `ROS_IP` must be the laptop's address there.
+- **Original quadcopter colours:** `web/meshes/` is built, not stored. Its preview needs the mesh's texture baked into a colour STL (numpy and Pillow), once after cloning and again if the mesh changes:
+  `tools/bake_mesh_colors.py <uav_simulator>/urdf/quadcopter/meshes/CERLAB_quadcopter.dae web/meshes/CERLAB_quadcopter.stl`.
+  Without it the original quadcopter is drawn plain red.
 - **Coloured map:** the Camera colour mode Camera colours come from `viz.colored_map` (default `/reconstruction/cloud`), a PointCloud2 with an `rgb` field; it shows as soon as something publishes it.
 
 ## Disk space
@@ -77,8 +81,11 @@ Use the CAD environment: `~/drone_cad/.venv/bin/python`, which has cadquery-ocp,
    - The Gazebo plugins come from the template, and the CAD meshes replace the visuals.
    - The LiDAR sits on a joint at the hinge, angled by `lidar_pitch_deg`.
    - `start_world.launch` publishes the LiDAR transforms from this URDF for any `*_cad.urdf` drone.
+   - With `quadcopter_omni_lidar_cam.urdf` as the template, the drone also carries the Insta360 X4 (`meshes/insta360_x4.stl`, origin at the lens centre). It sits at the xacro args `insta360_x` and `insta360_z`. `insta360_sideways:=1` turns the lenses left and right, puts the lens centre on the drone's axis (x ignored) and leans the X4 forward by the URDF property `insta360_side_tilt_deg` (55°). Its two fisheyes and the ideal 360 depth sensor go with it, and `omni_link` stays level.
 
-The drone then appears in the Drone gallery, drawn from its meshes. The LiDAR tilt choice (0°, 10°, 23.5°) turns the hinge in the preview and is passed to the simulator.
+The drone then appears in the Drone gallery, drawn from its meshes. The LiDAR tilt callout turns the hinge in the preview. On the 360 drone, the 360 camera callout switches the X4 between front-back (upright, x and z sliders) and left-right (z only), and the preview follows.
+
+The settings a drone can change are its URDF's xacro args listed in `config.json` `sim.xargs`, each with a label and range. A drone shows the ones its URDF declares. The server checks them and passes them to `start_world.launch` as one `xacro_args:="name=value ..."`. `lidar_pitch_deg` also goes as `{pitch}`, for setupTF and the planners. To make another setting adjustable, declare the xacro arg in the URDF and add it to `sim.xargs`. A slider in the page is still needed to change it. The opti360 nodes read both positions from `/robot_description`.
 
 ## Files
 - `server.py`: process manager and API (Python 3.8 standard library plus numpy).

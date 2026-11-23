@@ -36,6 +36,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import assets
+import runs as history
 from terminals import Terminals
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -101,6 +102,8 @@ class Task:
         return {'id': self.id, 'label': self.spec['label'], 'detail': self.spec.get('detail', ''), 'state': self.state,
                 'code': self.code, 'since': self.started, 'variant': self.variant, 'message': self.message,
                 'variants': [v['label'] for v in self.variants()] if self.spec.get('variants') else [],
+                'variant_info': [{k: v.get(k) for k in ('mode', 'about', 'details', 'learned', 'own_sim', 'dir', 'manual')} for v in self.variants()]
+                                if self.spec.get('variants') else [],
                 'needs': self.spec.get('needs', []), 'advanced': bool(self.spec.get('advanced')),
                 'record': bool(self.spec.get('record')), 'configured': self.configured(), 'remote': self.remote,
                 'hidden': bool(self.spec.get('hidden')), 'sizes': [v.get('size', '') for v in self.variants()],
@@ -205,24 +208,44 @@ class App:
         return assets.worlds(self.worlds_dir, self.cfg['sim'].get('spawn', {}))
 
     def drones(self):
-        return assets.drones(self.urdf_dir, self.cfg['sim'].get('drones', {}))
+        return assets.drones(self.urdf_dir, self.cfg['sim'].get('drones', {}), self.cfg['sim'].get('xargs', {}))
 
-    def choose(self, task, world, drone, gazebo=False, pitch=None):
-        """world/drone for the simulator command, checked against what is on disk."""
+    def choose(self, task, world, drone, gazebo=False, planner=None, xargs=None):
+        """world/drone for the simulator command, checked against what is on disk. xargs: {name: value} for the drone's
+        settings (assets.drones: the config's sim.xargs its URDF declares), each within its range; the rest keep the
+        URDF defaults. They go to the launch as {xacro_args}, and the LiDAR tilt also as {pitch}."""
         W = {w['file']: w for w in self.worlds()}
         if world not in W:
             return 'Pick a world'
-        if drone not in {d['file'] for d in self.drones()}:
+        D = {d['file']: d for d in self.drones()}
+        if drone not in D:
             return 'Pick a drone'
-        x, y, z = W[world]['start']
-        try:
-            pitch = float(23.5 if pitch is None else pitch)
-        except (TypeError, ValueError):
-            return 'LiDAR tilt must be a number'
-        if not -10 <= pitch <= 60:
-            return 'LiDAR tilt must be between -10 and 60 degrees'
+        spec = D[drone]['xargs']
+        values = {k: s['default'] for k, s in spec.items()}
+        if not isinstance(xargs or {}, dict):
+            return 'Drone settings must be name: value pairs'
+        for k, v in (xargs or {}).items():
+            if k not in spec:
+                return 'This drone has no setting %s' % k
+            s = spec[k]
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                return '%s must be a number' % s['label']
+            if not s['min'] <= v <= s['max']:
+                return '%s must be between %g and %g' % (s['label'], s['min'], s['max'])
+            values[k] = v
+        omni = any(s['kind'] == '360 depth (ideal)' for s in D[drone].get('sensors', []))
+        x, y, z = W[world]['start']; yaw = 0.0
+        if planner is not None:                                       # a planner that starts the drone elsewhere (ARiADNE: the pit floor)
+            mv = self.groups['sim'].tasks['mission'].variants()
+            sp = (mv[int(planner)].get('spawn') or {}).get(world.split('/')[0]) if 0 <= int(planner) < len(mv) else None
+            if sp: x, y, z, yaw = sp
+        pitch = values.get('lidar_pitch_deg', 23.5)              # setupTF and the planners take it as a launch arg
         task.choice = {'world': shlex.quote(world), 'drone': shlex.quote(drone), 'x': x, 'y': y, 'z': z,
-                       'gui': 'true' if gazebo else 'false', 'pitch': pitch, 'world_file': world, 'drone_file': drone}
+                       'gui': 'true' if gazebo else 'false', 'pitch': pitch, 'yaw': yaw, 'world_file': world, 'drone_file': drone,
+                       'xargs': values, 'xacro_args': shlex.quote(' '.join('%s=%g' % kv for kv in sorted(values.items()))),
+                       'omni': 'true' if omni else 'false'}
         return None
 
     def planner_choice(self, task, group, variant, settings):
@@ -231,14 +254,18 @@ class App:
         if v.get('manual'):
             return 'Manual flight needs no planner'
         sim = self.groups[group].tasks.get('sim')
-        world = sim.choice.get('world_file') if sim else None
-        pitch = sim.choice.get('pitch') if sim else None
+        world = sim.choice.get('world_file') if sim and sim.state in ('running', 'starting') else None
+        pitch = sim.choice.get('pitch') if sim and sim.state in ('running', 'starting') else None
         choice = {}
+        if v.get('own_sim'):                                         # e.g. EPIC on MARSIM: the world comes from the page
+            world = settings.pop('_world', None) if settings else None
+        if not self.requirement_met(v, world):
+            return '%s has no setup for this world yet' % v['label']
         if '{map}' in v.get('cmd', ''):
-            m = self.mission_map(world)
-            if not m:
-                return 'No exploration setup for this world yet (autonomous_flight/cfg/dynamic_exploration/maps/<world>.yaml)'
-            choice['map'] = m
+            choice['map'] = world.split('/')[0]
+        choice['pitch'] = 23.5 if pitch is None else pitch
+        if v.get('setup'):
+            choice['setup_path'] = expand(v['setup'])
         values = {}
         for f in self.cfg.get('settings', []):
             k = f['key']
@@ -250,6 +277,8 @@ class App:
                 return 'Bad value for ' + f['label']
         if pitch is not None and 'exploration' in v.get('dir', ''):     # the planner's own model of the LiDAR follows the tilt
             values.update({'DEP/lidar_pitch': pitch, 'DEP/max_edge_down_angle': 7.0 + pitch, 'DEP/max_edge_up_angle': 52.0 - pitch})
+        if '{overrides}' not in v.get('cmd', ''):
+            task.choice = choice; return None
         path = os.path.join(self.log_dir, 'overrides_%s.yaml' % group)
         with open(path, 'w') as fh:
             fh.write('# written by Mission Control for this launch: values changed in the window\n')
@@ -259,11 +288,16 @@ class App:
         task.choice = choice
         return None
 
-    def mission_map(self, world):
-        if not world: return None
-        folder = world.split('/')[0]
-        d = os.path.join(expand(self.cfg['sim'].get('planner_cfg', '')), 'dynamic_exploration', 'maps')
-        return folder if os.path.isfile(os.path.join(d, folder + '.yaml')) else None
+    def requirement_met(self, v, world):
+        """A planner variant's 'requires' file exists for this world (e.g. its map config)."""
+        req = v.get('requires')
+        if not req: return True
+        if not world: return False
+        path = req.format(planner_cfg=self.cfg['sim'].get('planner_cfg', ''), world=world.split('/')[0])
+        return os.path.isfile(expand(path))
+
+    def planners_for(self, world):
+        return [self.requirement_met(v, world) for v in self.groups['sim'].tasks['mission'].variants()]
 
     def settings(self, mode_dir):
         """The settings form: each field with its value in that mode's config files (and the map's, if it sets it)."""
@@ -285,14 +319,66 @@ class App:
             out.append(item)
         return out
 
-    def start(self, group, tid, variant=None, world=None, drone=None, gazebo=False, pitch=None, settings=None):
+    # ------------------------------------------------------------------ flight history
+    def history_dirs(self):
+        return self.cfg.get('history', {}).get('dirs', ['~/mission_runs'])
+
+    def run_path(self, rid):
+        """The file of a run id (a path under home), only inside the history folders."""
+        p = os.path.realpath(os.path.join(os.path.expanduser('~'), rid))
+        ok = any(p.startswith(os.path.realpath(expand(d)) + os.sep) for d in self.history_dirs())
+        return p if ok and os.path.isfile(p) else None
+
+    def runs(self):
+        maps = sorted({w['group'] for w in self.worlds()})
+        out = history.runs(self.history_dirs(), maps)
+        for r in out:
+            r['bags'] = history.bags_for(r, [self.bag_dir])
+        return out
+
+    def play_run(self, rid):
+        r = next((x for x in self.runs() if x['id'] == rid), None)
+        if not r or not r['bags']: return 'No recording for this run'
+        t = self.groups['sim'].tasks['playback']
+        if t.state in ('running', 'starting'): self.stop('sim', 'playback'); time.sleep(1)
+        t.choice = {'bags': ' '.join(shlex.quote(b['path']) for b in r['bags'])}
+        return self.start('sim', 'playback')
+
+    def save_run(self, d):
+        """A session with no planner log (manual flight): its summary and track, for the history."""
+        out = expand(os.path.join(self.root, 'runs')); os.makedirs(out, exist_ok=True)
+        stamp = time.strftime('%Y%m%d_%H%M%S', time.localtime(d.get('start') or time.time()))
+        json.dump(d, open(os.path.join(out, stamp + '_run.json'), 'w'))
+        return 'ok'
+
+    def save_settings(self, mode_dir, values):
+        """Write changed flight settings into the planner's config files, keeping each line's comment."""
+        base = os.path.realpath(os.path.join(expand(self.cfg['sim'].get('planner_cfg', '')), mode_dir))
+        if not mode_dir or not base.startswith(os.path.realpath(expand(self.cfg['sim'].get('planner_cfg', '')))):
+            return 'unknown planner config'
+        fields = {f['key']: f for f in self.cfg.get('settings', []) if f.get('type') != 'info'}
+        done = []
+        for k, val in values.items():
+            f = fields.get(k)
+            if not f: continue
+            fp = os.path.join(base, f['file'])
+            if not os.path.isfile(fp): continue
+            text = open(fp).read()
+            lit = ('true' if val else 'false') if f.get('type') == 'bool' else ('%g' % float(val))
+            pat = re.compile(r'^(%s:[ \t]*)([^#\n]*?)([ \t]*#.*)?$' % re.escape(f['path']), re.M)
+            if not pat.search(text): continue
+            text = pat.sub(lambda m: m.group(1) + lit + (m.group(3) or ''), text, count=1)
+            open(fp, 'w').write(text); done.append(f['label'])
+        return 'ok' if done else 'nothing saved'
+
+    def start(self, group, tid, variant=None, world=None, drone=None, gazebo=False, settings=None, planner=None, xargs=None):
         task = self.groups[group].tasks[tid]
         if tid == 'mission' and task.state not in ('running', 'starting', 'stopping'):
             vi = max(0, min(int(variant or 0), len(task.variants()) - 1))
             err = self.planner_choice(task, group, vi, settings)
             if err: return err
         if task.spec.get('choose') and task.state not in ('running', 'starting', 'stopping'):
-            err = self.choose(task, world, drone, gazebo, pitch)
+            err = self.choose(task, world, drone, gazebo, planner, xargs)
             if err: return err
         with task.lock:
             if task.state in ('running', 'starting', 'stopping'):
@@ -301,7 +387,8 @@ class App:
                 task.variant = max(0, min(int(variant), len(task.variants()) - 1))
             if not task.configured():
                 return 'This button is not set up yet (config.json)'
-            missing = [n for n in task.spec.get('needs', []) if self.groups[group].tasks[n].state != 'running']
+            needs = task.variants()[task.variant].get('needs', task.spec.get('needs', [])) if variant is not None or task.spec.get('variants') else task.spec.get('needs', [])
+            missing = [n for n in needs if self.groups[group].tasks[n].state != 'running']
             if missing:
                 return 'Start first: ' + ', '.join(self.groups[group].tasks[n].spec['label'] for n in missing)
             if task.spec.get('record') and not task.remote and self.free_bytes() < self.min_free + self.split_mb * MB:
@@ -345,7 +432,7 @@ class App:
         return False
 
     def _start_local(self, task, cmd):
-        setup = expand(self.groups[task.group.name].cfg['setup'])
+        setup = task.choice.get('setup_path') or expand(self.groups[task.group.name].cfg['setup'])
         env = dict(os.environ, ROS_LOG_DIR=os.path.join(self.log_dir, 'ros'), PYTHONUNBUFFERED='1')
         for k, v in self.groups[task.group.name].cfg.get('env', {}).items():   # "" removes the variable
             if v == '': env.pop(k, None)
@@ -532,6 +619,12 @@ class App:
                         nums = tail.split()
                         self.drone['free_gb'] = int(nums[0]) / GB if nums else None
                         self.drone['bags_gb'] = int(nums[1]) / GB if len(nums) > 1 else 0.0
+                for g in self.groups.values():                     # a recording outliving its session would fill the disk
+                    for t in g.tasks.values():
+                        if t.spec.get('record') and not t.remote and t.state == 'running' and time.time() - (t.started or 0) > 10 \
+                                and not any(o.state in ('running', 'starting') for k, o in g.tasks.items() if k in ('sim', 'mission')):
+                            self.notice('error', '%s stopped: the session it was recording has ended' % t.spec['label'])
+                            self.stop(g.name, t.id)
                 if n % 15 == 0:
                     self.trim_ros_logs()
                 if n % 30 == 0:
@@ -613,8 +706,17 @@ def make_handler(app):
             if u.path == '/api/worlds':
                 W = app.worlds(); notes = app.cfg['sim'].get('world_notes', {})
                 for w in W:
-                    w['mission_ready'] = bool(app.mission_map(w['file'])); w['notes'] = notes.get(w['group'])
+                    w['planners'] = app.planners_for(w['file']); w['notes'] = notes.get(w['group'])
                 return self.send(200, {'worlds': W})
+            if u.path == '/api/runs':
+                return self.send(200, {'runs': app.runs()})
+            if u.path in ('/api/runs/track', '/api/runs/svg'):
+                p = app.run_path(q.get('id', [''])[0])
+                if not p: return self.send(404, {'message': 'no such run'})
+                if u.path.endswith('svg'):
+                    sv = p[:-4] + '.svg'
+                    return self.send(200, open(sv, 'rb').read(), 'image/svg+xml') if os.path.isfile(sv) else self.send(404, {'message': 'no picture'})
+                return self.send(200, {'track': history.track(p)})
             if u.path == '/api/settings':
                 return self.send(200, {'fields': app.settings(q.get('dir', ['dynamic_exploration'])[0])})
             if u.path == '/api/drones':
@@ -656,12 +758,18 @@ def make_handler(app):
                     _, _, group, tid, action = parts
                     if action == 'start':
                         msg = app.start(group, tid, body.get('variant'), body.get('world'), body.get('drone'),
-                                        bool(body.get('gazebo')), body.get('pitch'), body.get('settings'))
+                                        bool(body.get('gazebo')), body.get('settings'), body.get('planner'), body.get('xargs'))
                     elif action == 'kill':
                         msg = app.kill(group, tid)
                     else:
                         msg = app.stop(group, tid)
                     return self.send(200, {'message': msg})
+                if parts == ['api', 'runs', 'play']:
+                    return self.send(200, {'message': app.play_run(body.get('id', ''))})
+                if parts == ['api', 'runs', 'save']:
+                    return self.send(200, {'message': app.save_run(body)})
+                if parts == ['api', 'settings', 'save']:
+                    return self.send(200, {'message': app.save_settings(body.get('dir', ''), body.get('values', {}))})
                 if parts == ['api', 'term', 'open']:
                     t = app.open_terminal(body.get('group', 'sim'))
                     return self.send(200, {'id': t.id, 'title': t.title})

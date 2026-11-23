@@ -1,5 +1,5 @@
 {
-  "_doc": "CERLAB UAV Mission Control setup. Each task is a process the window starts and stops; 'cmd' runs after sourcing 'setup', with 'env' applied (\"\" unsets; the sim always uses a local ROS master, whatever ~/.bashrc says). In the simulator cmd, {world} {drone} {x} {y} {z} {gui} {pitch} come from the Simulator section. 'hidden' tasks run but have no button; 'auto' tasks start with the first other task of their tab. Recording variants carry a 'size' label for the dropdown. Edit and restart the server.",
+  "_doc": "CERLAB UAV Mission Control setup. Each task is a process the window starts and stops; 'cmd' runs after sourcing 'setup', with 'env' applied (\"\" unsets; the sim always uses a local ROS master, whatever ~/.bashrc says). In the simulator cmd, {world} {drone} {x} {y} {z} {gui} {pitch} {xacro_args} {omni} come from the Simulator section (sim.xargs). 'hidden' tasks run but have no button; 'auto' tasks start with the first other task of their tab. Recording variants carry a 'size' label for the dropdown. Edit and restart the server.",
   "storage": {
     "root": "~/mission_control_data",
     "log_budget_mb": 300,
@@ -46,34 +46,50 @@
         0.2
       ]
     },
+    "xargs": {
+      "_doc": "Drone settings the Simulator can change: xacro args of the drone URDFs, each with its range. A drone shows the ones its URDF declares; they reach start_world.launch as xacro_args (lidar_pitch_deg also as {pitch}, for setupTF and the planners).",
+      "lidar_pitch_deg": { "label": "LiDAR tilt", "min": -10, "max": 45 },
+      "insta360_x": { "label": "360 camera x", "min": -0.15, "max": 0.15 },
+      "insta360_z": { "label": "360 camera z", "min": 0.15, "max": 0.6 },
+      "insta360_sideways": { "label": "360 camera layout", "min": 0, "max": 1 }
+    },
     "drones": {
       "quadcopter_cerlab_lidar_cad.urdf": {
         "label": "CERLAB LiDAR drone",
-        "note": "From CAD: Mid-360 on an adjustable front hinge"
+        "note": "RealSense D435 + Mid-360 on a tilting front hinge"
+      },
+      "quadcopter_cerlab_lidar_cam_cad.urdf": {
+        "label": "CERLAB LiDAR + 360 drone",
+        "note": "RealSense + tilted Mid-360 + Insta360 X4"
       },
       "quadcopter.urdf": {
-        "label": "Depth camera",
-        "note": "Forward RGB-D only"
+        "label": "CERLAB quadcopter (original)",
+        "note": "Original red guarded frame (CERLAB_quadcopter mesh), forward RGB-D"
       },
       "quadcopter_lidar.urdf": {
         "label": "Tilted LiDAR",
-        "note": "Mid-360 pitched 23.5°, forward RGB-D"
+        "note": "Mid-360 pitched 23.5°, forward RGB-D",
+        "hidden": true
       },
       "quadcopter_omni_lidar_cam.urdf": {
         "label": "LiDAR + 360 camera",
-        "note": "Tilted Mid-360 and dual fisheye"
+        "note": "Tilted Mid-360 and dual fisheye",
+        "hidden": true
       },
       "quadcopter_omni.urdf": {
         "label": "Ideal 360 depth",
-        "note": "Research: perfect 360° range sensor"
+        "note": "Research: perfect 360° range sensor",
+        "hidden": true
       },
       "quadcopter_omni_cam.urdf": {
         "label": "360 camera",
-        "note": "Research: dual fisheye with ideal 360° depth"
+        "note": "Research: dual fisheye with ideal 360° depth",
+        "hidden": true
       },
       "quadcopter_omni_lidar.urdf": {
         "label": "LiDAR + ideal 360 depth",
-        "note": "Research: for scoring camera depth"
+        "note": "Research: for scoring camera depth",
+        "hidden": true
       }
     },
     "tasks": [
@@ -87,7 +103,7 @@
         "id": "sim",
         "label": "Simulator",
         "choose": true,
-        "cmd": "roslaunch uav_simulator start_world.launch world:={world} drone:={drone} spawn_x:={x} spawn_y:={y} spawn_z:={z} gui:={gui} lidar_pitch_deg:={pitch}"
+        "cmd": "roslaunch uav_simulator start_world.launch world:={world} drone:={drone} spawn_x:={x} spawn_y:={y} spawn_z:={z} spawn_yaw:={yaw} gui:={gui} lidar_pitch_deg:={pitch} xacro_args:={xacro_args} omni_depth:={omni}"
       },
       {
         "id": "link",
@@ -104,25 +120,81 @@
         ],
         "variants": [
           {
-            "label": "Exploration",
+            "label": "HIRE 3D",
+            "mode": "Exploration",
             "dir": "dynamic_exploration",
-            "cmd": "roslaunch autonomous_flight dynamic_exploration.launch gui:=false map:={map} overrides:={overrides}"
+            "about": "Next-best-view roadmap, tuned for deep pits",
+            "requires": "{planner_cfg}/dynamic_exploration/maps/{world}.yaml",
+            "cmd": "roslaunch autonomous_flight dynamic_exploration.launch gui:=false map:={map} overrides:={overrides}",
+            "details": "Our 3D version of HIRE: a probabilistic roadmap whose goals are scored by unexplored blocks seen, with a depth bias that pulls it down into the pit and a revisit penalty against backtracking."
+          },
+          {
+            "label": "HIRE",
+            "mode": "Exploration",
+            "dir": "dynamic_exploration",
+            "about": "The original planner, without the 3D changes",
+            "requires": "{planner_cfg}/dynamic_exploration/maps/{world}.yaml",
+            "cmd": "roslaunch autonomous_flight dynamic_exploration.launch gui:=false map:={map} preset:=baseline overrides:={overrides}",
+            "details": "Original HIRE (DEP): goals scored by the count of unknown voxels in view, over the whole region. No depth bias, revisit penalty or gap tolerance; the closest runnable version of the published planner, for comparison."
+          },
+          {
+            "label": "ARiADNE",
+            "mode": "Exploration",
+            "dir": "dynamic_exploration",
+            "learned": true,
+            "about": "Learned graph policy (pretrained)",
+            "requires": "{planner_cfg}/ariadne/{world}.yaml",
+            "spawn": {
+              "excavation_simple": [
+                3.0,
+                8.0,
+                -7.8,
+                1.5708
+              ],
+              "excavation_long": [
+                10.0,
+                8.0,
+                -9.8,
+                1.5708
+              ],
+              "excavation_slab": [
+                5.0,
+                8.0,
+                -9.8,
+                1.5708
+              ]
+            },
+            "cmd": "roslaunch autonomous_flight ariadne_exploration.launch sim:=false gui:=false map:={map} lidar_pitch_deg:={pitch} overrides:={overrides}",
+            "details": "ARiADNE: an attention-based policy over a graph of viewpoints, pretrained by its authors. It plans on a 2D slice, so it starts on the pit floor and explores at one height."
+          },
+          {
+            "label": "EPIC",
+            "mode": "Exploration",
+            "about": "Global tour planner on its own simulator",
+            "requires": "~/EPIC/src/global_planner/exploration_manager/config/maps/{world}.yaml",
+            "own_sim": true,
+            "needs": [],
+            "setup": "~/EPIC/devel/setup.bash",
+            "cmd": "roslaunch epic_planner pit_1ms.launch map:={map} gui:=false",
+            "details": "EPIC: an ordered tour through every frontier, on its own simulator (MARSIM). Its status and map reach this window; watch the rest in its RViz."
           },
           {
             "label": "Navigation",
+            "mode": "Navigation",
             "dir": "dynamic_navigation",
             "cmd": "roslaunch autonomous_flight dynamic_navigation.launch overrides:={overrides}"
           },
           {
             "label": "Inspection",
+            "mode": "Inspection",
             "dir": "dynamic_inspection",
             "cmd": "roslaunch autonomous_flight dynamic_inspection.launch overrides:={overrides}"
           },
           {
             "label": "Manual",
+            "mode": "Manual",
             "manual": true,
-            "cmd": "",
-            "detail": "keyboard, from this window"
+            "cmd": ""
           }
         ]
       },
@@ -175,6 +247,13 @@
             ]
           }
         ]
+      },
+      {
+        "id": "playback",
+        "label": "Recording playback",
+        "hidden": true,
+        "needs": [],
+        "cmd": "rosbag play --clock {bags}"
       }
     ],
     "planner_cfg": "~/catkin_ws/src/CERLAB-UAV-Autonomy/autonomous_flight/cfg",
@@ -372,16 +451,6 @@
       "step": 0.1
     },
     {
-      "key": "autonomous_flight/reach_goal_distance",
-      "label": "Goal reached within",
-      "unit": "m",
-      "file": "flight_base.yaml",
-      "path": "reach_goal_distance",
-      "min": 0.05,
-      "max": 1,
-      "step": 0.05
-    },
-    {
       "key": "dynamic_map/raycast_max_length",
       "label": "Trusted sensor range",
       "unit": "m",
@@ -414,25 +483,18 @@
       "step": 0.05
     },
     {
-      "key": "DEP/tour_enabled",
-      "label": "Tour planning",
-      "type": "bool",
-      "file": "exploration_param.yaml",
-      "path": "tour_enabled"
-    },
-    {
-      "key": "DEP/static_environment",
-      "label": "Static environment",
-      "type": "bool",
-      "file": "exploration_param.yaml",
-      "path": "static_environment"
-    },
-    {
       "key": "_bspline_seed",
       "label": "Trajectory",
       "type": "info",
-      "value": "B-spline from a piecewise-linear seed",
-      "note": "the polynomial seed is commented out in dynamicExploration.cpp, so this is the only generator wired in"
+      "value": "B-spline, linear seed",
+      "note": "polynomial seed disabled"
     }
-  ]
+  ],
+  "history": {
+    "_doc": "where past runs are listed from: the planners' run folders (CSV + SVG per run) and Mission Control's own saved sessions",
+    "dirs": [
+      "~/mission_runs",
+      "~/mission_control_data/runs"
+    ]
+  }
 }

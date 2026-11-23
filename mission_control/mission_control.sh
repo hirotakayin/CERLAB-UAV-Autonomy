@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Mission Control and open it in its own window. Ctrl-C here stops the server and every simulation task cleanly
+# Start CERLAB UAV Mission Control and open it in its own window. Ctrl-C here stops the server and every simulation task cleanly
 # (drone tasks keep running on the drone).
 cd "$(dirname "$0")"
 PORT=${PORT:-8765}

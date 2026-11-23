@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 _cache = {}
+STL_RECORD = np.dtype([('n', '<f4', 3), ('v', '<f4', (3, 3)), ('a', '<u2')])   # binary STL: normal, 3 vertices, attribute
 
 
 def cached(path, fn):
@@ -179,22 +180,24 @@ def worlds(root, spawn_cfg):
 
 # ------------------------------------------------------------------ drones
 XARG = re.compile(r'<xacro:arg\s+name="([^"]+)"\s+default="([^"]*)"')
+XPROP = re.compile(r'<xacro:property\s+name="([^"]+)"\s+value="([^"]*)"')
 
 
 def xacro_eval(text):
-    """Enough xacro for our URDFs: $(arg x) from defaults, then ${expr} with radians/pi."""
+    """Enough xacro for our URDFs: $(arg x) from defaults, then ${expr} with radians/pi and the numeric xacro:property values."""
     defaults = dict(XARG.findall(text))
     text = re.sub(r'\$\(arg\s+([^)]+)\)', lambda m: defaults.get(m.group(1).strip(), '0'), text)
-    env = {'radians': math.radians, 'degrees': math.degrees, 'pi': math.pi, 'cos': math.cos, 'sin': math.sin}
+    env = {'radians': math.radians, 'degrees': math.degrees, 'pi': math.pi, 'cos': math.cos, 'sin': math.sin, 'float': float}
+    for k, v in XPROP.findall(text):
+        try:
+            env[k] = float(v)
+        except ValueError:
+            pass
     return re.sub(r'\$\{([^}]*)\}', lambda m: repr(eval(m.group(1), {'__builtins__': {}}, env)), text)
 
 
 SENSOR_KIND = {'ray': 'lidar', 'gpu_ray': 'lidar', 'depth': 'depth camera', 'camera': 'camera',
                'wideanglecamera': 'fisheye camera', 'imu': 'imu'}
-
-
-def XARG_DEFAULT(text, name, default):
-    return dict(XARG.findall(text)).get(name, default)
 
 
 def parse_drone(path):
@@ -224,17 +227,59 @@ def parse_drone(path):
         import json
         info = json.load(open(model_json))
         out['model'] = {'dir': m.group(1), 'groups': info['groups'], 'hinge_xyz': info['hinge_xyz'],
-                        'lidar_from_hinge': info['lidar_from_hinge'], 'bounds': info['bounds']}
+                        'lidar_from_hinge': info['lidar_from_hinge'], 'bounds': info['bounds'],
+                        'components': info.get('components', [])}
         out['span'] = round(info['bounds'][1][0] - info['bounds'][0][0], 3)
         out['sensors'] = [s for s in sensors if s['kind'] != 'lidar']      # the LiDAR is drawn from the hinge
-    if 'lidar_pitch_deg' in raw:
-        out['tilt_default'] = float(XARG_DEFAULT(raw, 'lidar_pitch_deg', 23.5))
+    if not out.get('model') and mesh is not None:
+        # a drone drawn from one mesh (the original CERLAB quadcopter): its STL (the .dae Gazebo draws has an STL twin)
+        f = re.sub(r'^package://uav_simulator/urdf/', '', mesh.get('filename', ''))
+        stl = os.path.splitext(f)[0] + '.stl'
+        if os.path.isfile(os.path.join(os.path.dirname(path), stl)):
+            vis = root.find('.//visual')
+            o = vis.find('origin') if vis is not None else None
+            xyz = [float(a) for a in (o.get('xyz', '0 0 0') if o is not None else '0 0 0').split()]
+            lo, hi = stl_bounds(os.path.join(os.path.dirname(path), stl))
+            baked = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web', 'meshes', os.path.basename(stl))
+            url = '/meshes/' + os.path.basename(stl) if os.path.isfile(baked) else '/models/' + stl   # tools/bake_mesh_colors.py
+            out['mesh'] = {'url': url, 'scale': scale, 'xyz': xyz,
+                           'bounds': [[round(lo[i] * scale + xyz[i], 4) for i in range(3)], [round(hi[i] * scale + xyz[i], 4) for i in range(3)]]}
+    out['xarg_defaults'] = {}                                  # the URDF's numeric xacro args (drones() keeps the tunable ones)
+    for k, v in XARG.findall(raw):
+        try:
+            out['xarg_defaults'][k] = float(v)
+        except ValueError:
+            pass
+    if out.get('model') and 'insta360_x' in raw and 'insta360_x4' in raw:
+        # the 360 camera (make_cad_urdf.py): not in model.json; the omni_link visual, origin at the lens centre, level,
+        # placed by the xacro args insta360_x / insta360_z / insta360_sideways (lenses left and right: on the drone's
+        # axis, leaned forward the URDF's insta360_side_tilt_deg)
+        x, z = out['xarg_defaults'].get('insta360_x', 0.0), out['xarg_defaults'].get('insta360_z', 0.0)
+        out['cam_side_tilt'] = float(dict(XPROP.findall(raw)).get('insta360_side_tilt_deg', 0))
+        mesh = os.path.join(os.path.dirname(path), out['model']['dir'], 'meshes', 'insta360_x4.stl')
+        out['extra_parts'] = [{'name': 'insta360_x4', 'mesh': 'insta360_x4', 'xyz': [x, 0.0, z], 'edit': 'mount',
+                               'bounds': stl_bounds(mesh)}]
+        out['model']['components'] = out['model']['components'] + [
+            {'label': '360 camera', 'detail': 'Insta360 X4 · /insta360/front + /back',
+             'xyz': [x, 0.0, z], 'edit': 'mount', 'part': 'insta360_x4'}]
     return out
 
 
-def drones(root, names):
+def stl_bounds(path):
+    """[[min], [max]] of a binary STL's vertices."""
+    raw = open(path, 'rb').read()
+    n = int.from_bytes(raw[80:84], 'little')
+    v = np.frombuffer(raw[84:84 + 50 * n], STL_RECORD)['v'].reshape(-1, 3)
+    return [[round(float(a), 4) for a in v.min(0)], [round(float(a), 4) for a in v.max(0)]]
+
+
+def drones(root, names, xargs=None):
+    """Drones named in config.json (sim.drones) first, in that order, then the rest alphabetically. xargs: config.json
+    sim.xargs, the settings the Simulator may change; each drone gets the ones its URDF declares, as
+    {name: {label, min, max, default}}."""
     out = []
-    for path in sorted(glob.glob(os.path.join(root, '*.urdf'))):
+    order = {f: i for i, f in enumerate(names)}
+    for path in sorted(glob.glob(os.path.join(root, '*.urdf')), key=lambda p: (order.get(os.path.basename(p), len(order)), p)):
         f = os.path.basename(path)
         meta = names.get(f, {})
         if meta.get('hidden'):
@@ -243,5 +288,8 @@ def drones(root, names):
             info = cached(path, parse_drone)
         except Exception as e:  # a URDF this reader cannot follow still shows, without sensors
             info = {'sensors': [], 'span': 0.5, 'error': str(e)}
-        out.append(dict(info, file=f, label=meta.get('label') or f[:-5].replace('_', ' '), note=meta.get('note', '')))
+        tunable = {k: dict(spec, default=info['xarg_defaults'][k]) for k, spec in (xargs or {}).items()
+                   if not k.startswith('_') and k in info.get('xarg_defaults', {})}
+        out.append(dict({k: v for k, v in info.items() if k != 'xarg_defaults'}, xargs=tunable,
+                        file=f, label=meta.get('label') or f[:-5].replace('_', ' '), note=meta.get('note', '')))
     return out

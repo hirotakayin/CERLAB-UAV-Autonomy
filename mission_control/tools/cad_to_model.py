@@ -48,6 +48,7 @@ def main():
             if 'path' not in g and t['path'] and g['name'] != 'frame' and not g.get('any_path'): continue
             if 'names' in g and t['name'] not in g['names']: continue
             if 'size' in g and not np.allclose(np.ptp(V, 0), g['size'], atol=g.get('size_tol', 0.004)): continue
+            if 'sizes' in g and not any(np.allclose(np.ptp(V, 0), sz, atol=g.get('size_tol', 0.004)) for sz in g['sizes']): continue
             members[g['name']].append(t['key']); break
 
     os.makedirs(os.path.join(a.out, 'meshes'), exist_ok=True)
@@ -58,6 +59,23 @@ def main():
         keys = members[g['name']]
         if not keys:
             print('group %s: no parts' % g['name']); continue
+        if g.get('per_instance'):                                   # e.g. propellers: one mesh per part, origin on its hub
+            hubs = [to_ros(h) for h in g['hubs_cad']]
+            for i, k in enumerate(keys):
+                P = to_ros(z[k + '|V']); c = (P.min(0) + P.max(0)) / 2
+                hub = min(hubs, key=lambda h: np.hypot(*(h[:2] - c[:2])))
+                pm = trimesh.Trimesh(P - hub, z[k + '|F'], process=True); pm.update_faces(pm.nondegenerate_faces())
+                if len(pm.faces) > g['tris']:
+                    v2, f2 = fast_simplification.simplify(pm.vertices, pm.faces, target_reduction=1 - g['tris'] / len(pm.faces))
+                    q = trimesh.Trimesh(v2, f2, process=True)
+                    if np.abs(q.bounds - pm.bounds).max() <= 0.002: pm = q
+                name = '%s_%d' % (g['name'], i)
+                pm.export(os.path.join(a.out, 'meshes', name + '.stl'))
+                info['groups'][name] = {'parts': 1, 'tris': len(pm.faces), 'moving': False, 'bounds': (pm.bounds + hub).round(4).tolist(),
+                                        'origin': np.round(hub, 4).tolist(), 'rotor': True}
+                allV.append(pm.vertices + hub)
+            print('%-14s %3d parts  -> one mesh each on its hub, %d triangles each' % (g['name'], len(keys), len(pm.faces)))
+            continue
         # each part separately: its share of the group's budget by surface area; tiny shares become an oriented box,
         # so small parts (feet, pins) keep their place and size instead of collapsing
         meshes = []

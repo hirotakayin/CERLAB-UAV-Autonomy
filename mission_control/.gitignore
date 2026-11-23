@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+# built from uav_simulator by tools/bake_mesh_colors.py (README, Setup)
+web/meshes/
