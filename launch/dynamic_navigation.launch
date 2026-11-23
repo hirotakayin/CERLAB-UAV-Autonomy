@@ -13,4 +13,7 @@
 	<rosparam file="$(find autonomous_flight)/cfg/dynamic_navigation/dynamic_detector_param.yaml" ns="/onboard_detector" />
 
 	<node pkg="autonomous_flight" type="dynamic_navigation_node" name="dynamic_navigation_node" output="screen" />
+	<!-- overrides:=<file.yaml> (Mission Control's flight settings): loaded last, so it wins over the files above -->
+	<arg name="overrides" default=""/>
+	<rosparam if="$(eval arg('overrides') != '')" command="load" file="$(arg overrides)"/>
 </launch>

@@ -52,4 +52,7 @@
 		<remap from="/camera/aligned_depth_to_color/image_raw_t" to="/camera/depth/image_raw"/>
 		<remap from="/camera/color/image_raw_t" to="/camera/color/image_raw"/>
 	</node>
+	<!-- overrides:=<file.yaml> (Mission Control's flight settings): loaded last, so it wins over the files above -->
+	<arg name="overrides" default=""/>
+	<rosparam if="$(eval arg('overrides') != '')" command="load" file="$(arg overrides)"/>
 </launch>

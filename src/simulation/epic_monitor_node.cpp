@@ -2,7 +2,9 @@
 	FILE: epic_monitor_node.cpp
 	-----------------------------
 	Scores an EPIC flight like the CERLAB presets: runs the same occupancy map on EPIC's lidar and odometry,
-	publishes the dashboard's status and writes the same CSV and picture when the drone lands
+	publishes the dashboard's status and writes the same CSV and picture when the drone lands.
+	Also scores ARiADNE in Gazebo (ariadne_exploration.launch): private params ~mission_ns, ~odom_topic, ~cloud_topic,
+	~publish_pose and ~kind switch it from EPIC's simulator topics, which stay the defaults
 */
 
 #include <autonomous_flight/simulation/terminalRelay.h>
@@ -125,6 +127,8 @@ private:
 	double sampleClearance_ = std::numeric_limits<double>::infinity(), runClearance_ = std::numeric_limits<double>::infinity();
 	std::vector<char> floorSeen_;
 	std::string state_ = "IDLE", preset_, saveDir_;
+	std::string kind_ = "epic"; // the planner's name in the plan log and CSV
+	bool publishPose_ = true; // EPIC's simulator has no /CERLAB/quadcopter/pose for the map and dashboard; Gazebo does
 	ros::Time startTime_, endTime_;
 	std::vector<RunSample> samples_;
 	std::vector<PlanRecord> plans_;
@@ -164,7 +168,7 @@ private:
 		msg.header.stamp = odom->header.stamp;
 		msg.header.frame_id = "map";
 		msg.pose = pose;
-		this->posePub_.publish(msg);
+		if (this->publishPose_) this->posePub_.publish(msg);
 	}
 
 	void stateCB(const std_msgs::StringConstPtr& msg){
@@ -213,7 +217,7 @@ private:
 		json << std::fixed << std::setprecision(2) << "[";
 		for (size_t i=0; i<this->plans_.size(); ++i){
 			const PlanRecord& p = this->plans_[i];
-			json << (i == 0 ? "" : ",") << "{\"kind\":\"epic\",\"run\":1,\"t\":" << p.t
+			json << (i == 0 ? "" : ",") << "{\"kind\":\"" << this->kind_ << "\",\"run\":1,\"t\":" << p.t
 				<< ",\"from\":[" << p.from(0) << "," << p.from(1) << "," << p.from(2) << "]"
 				<< ",\"goal\":[" << p.goal(0) << "," << p.goal(1) << "," << p.goal(2) << "]"
 				<< ",\"path_length\":" << p.pathLength << ",\"legs\":" << p.legs << ",\"turn\":" << p.turn
@@ -395,8 +399,8 @@ private:
 			const PlanRecord& p = this->plans_[i];
 			goals.push_back(p.goal);
 			std::ostringstream row;
-			// score, predicted voxels, candidates and roadmap size do not exist in EPIC: left empty. A goal counts as flown once chosen
-			row << std::fixed << std::setprecision(2) << "1," << p.t << ",waypoint,,,,,,,,,,epic," << i + 1 << "," << p.goal(0) << "," << p.goal(1) << "," << p.goal(2) << "," << (p.goal - p.from).norm() << "," << p.pathLength << "," << p.legs << "," << p.turn << ",,,," << p.pathTime << ",," << p.revisits << ",,," << p.planTime << ",1,,,,,";
+			// score, predicted voxels, candidates and roadmap size do not exist in EPIC or ARiADNE: left empty. A goal counts as flown once chosen
+			row << std::fixed << std::setprecision(2) << "1," << p.t << ",waypoint,,,,,,,,,," << this->kind_ << "," << i + 1 << "," << p.goal(0) << "," << p.goal(1) << "," << p.goal(2) << "," << (p.goal - p.from).norm() << "," << p.pathLength << "," << p.legs << "," << p.turn << ",,,," << p.pathTime << ",," << p.revisits << ",,," << p.planTime << ",1,,,,,";
 			rows.push_back({p.t, row.str()});
 		}
 		std::stable_sort(rows.begin(), rows.end(), [](const std::pair<double, std::string>& a, const std::pair<double, std::string>& b){return a.first < b.first;});
@@ -477,27 +481,38 @@ public:
 		}
 		double floorZ;
 		if (this->nh_.getParam("autonomous_flight/floor_z", floorZ)) this->floorZ_ = floorZ;
-		this->nh_.param<std::string>("autonomous_flight/preset", this->preset_, "epic");
+		// which planner and simulator: EPIC in MARSIM by default, ariadne_exploration.launch sets these for Gazebo
+		ros::NodeHandle pnh ("~");
+		std::string missionNs, odomTopic, cloudTopic;
+		pnh.param<std::string>("mission_ns", missionNs, "/epic_mission");
+		pnh.param<std::string>("odom_topic", odomTopic, "/quad_0/lidar_slam/odom");
+		pnh.param<std::string>("cloud_topic", cloudTopic, "/quad0_pcl_render_node/cloud"); // a world-frame cloud to put in the lidar frame; "" = none (Gazebo's is already)
+		pnh.param<bool>("publish_pose", this->publishPose_, true);
+		pnh.param<std::string>("kind", this->kind_, "epic");
+
+		this->nh_.param<std::string>("autonomous_flight/preset", this->preset_, this->kind_);
 		this->nh_.param<std::string>("autonomous_flight/run_save_dir", this->saveDir_, "");
 		std::vector<double> home;
-		if (this->nh_.getParam("epic_mission/home", home) and home.size() == 3) this->home_ = Eigen::Vector3d (home[0], home[1], home[2]);
+		if (this->nh_.getParam(missionNs + "/home", home) and home.size() == 3) this->home_ = Eigen::Vector3d (home[0], home[1], home[2]);
 
 		this->cloudPub_ = this->nh_.advertise<sensor_msgs::PointCloud2>("/epic_monitor/cloud_lidar", 5);
 		this->statusPub_ = this->nh_.advertise<std_msgs::String>("/exploration/status", 10);
 		this->planLogPub_ = this->nh_.advertise<std_msgs::String>("/exploration/plan_log", 1, true);
-		this->posePub_ = this->nh_.advertise<geometry_msgs::PoseStamped>("/CERLAB/quadcopter/pose", 10);
+		if (this->publishPose_) this->posePub_ = this->nh_.advertise<geometry_msgs::PoseStamped>("/CERLAB/quadcopter/pose", 10);
 		this->unknownPub_ = this->nh_.advertise<sensor_msgs::PointCloud2>("/exploration/unknown_voxels", 1);
 		this->map_.reset(new mapManager::occMap (this->nh_));
 
-		this->cloudSub_.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(this->nh_, "/quad0_pcl_render_node/cloud", 5));
-		this->odomFilterSub_.reset(new message_filters::Subscriber<nav_msgs::Odometry>(this->nh_, "/quad_0/lidar_slam/odom", 25));
-		this->cloudOdomSync_.reset(new message_filters::Synchronizer<CloudOdomPolicy>(CloudOdomPolicy(100), *this->cloudSub_, *this->odomFilterSub_));
-		this->cloudOdomSync_->registerCallback(boost::bind(&epicMonitor::cloudOdomCB, this, _1, _2));
+		this->odomFilterSub_.reset(new message_filters::Subscriber<nav_msgs::Odometry>(this->nh_, odomTopic, 25));
+		if (not cloudTopic.empty()){
+			this->cloudSub_.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(this->nh_, cloudTopic, 5));
+			this->cloudOdomSync_.reset(new message_filters::Synchronizer<CloudOdomPolicy>(CloudOdomPolicy(100), *this->cloudSub_, *this->odomFilterSub_));
+			this->cloudOdomSync_->registerCallback(boost::bind(&epicMonitor::cloudOdomCB, this, _1, _2));
+		}
 		this->odomFilterSub_->registerCallback(&epicMonitor::odomCB, this);
 
-		this->stateSub_ = this->nh_.subscribe("/epic_mission/state", 10, &epicMonitor::stateCB, this);
-		this->eventSub_ = this->nh_.subscribe("/epic_mission/event", 50, &epicMonitor::eventCB, this);
-		this->planSub_ = this->nh_.subscribe("/epic_mission/plan", 50, &epicMonitor::planCB, this);
+		this->stateSub_ = this->nh_.subscribe(missionNs + "/state", 10, &epicMonitor::stateCB, this);
+		this->eventSub_ = this->nh_.subscribe(missionNs + "/event", 50, &epicMonitor::eventCB, this);
+		this->planSub_ = this->nh_.subscribe(missionNs + "/plan", 50, &epicMonitor::planCB, this);
 		this->unknownTimer_ = this->nh_.createTimer(ros::Duration(1.0), &epicMonitor::unknownCB, this);
 		this->statusTimer_ = this->nh_.createTimer(ros::Duration(0.5), &epicMonitor::statusCB, this);
 		this->clearanceTimer_ = this->nh_.createTimer(ros::Duration(0.1), &epicMonitor::clearanceCB, this);

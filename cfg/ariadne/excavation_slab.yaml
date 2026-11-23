@@ -1,0 +1,10 @@
+# ARiADNE baseline in excavation_slab: pit x [0, 10], y [5, 35]: the staggered walls under the low slab (underside z -6.5).
+# Starts on the pit floor, explores at one height floor + 1.5 m (the height DEP's lowest goals keep, plus 0.3 m) and
+# plans on the slice floor + 0.5 m to floor + 3.0 m of the octomap. The band starts above the floor, or the floor counts
+# as an obstacle everywhere, and ends under the slab in excavation_slab (z -6.5), or the covered middle reads as solid.
+ariadne_mission:
+  home: [5.0, 8.0, -9.8] # where the sim spawns the drone (ariadne_exploration.launch spawn_*). Must match
+  fly_z: -8.5
+octomap:
+  occupancy_min_z: -9.5
+  occupancy_max_z: -7.0

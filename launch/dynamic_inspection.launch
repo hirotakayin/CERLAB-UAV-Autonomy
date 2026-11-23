@@ -13,4 +13,7 @@
 
 	<node pkg="autonomous_flight" type="throttle_topics.sh" name="throttle_topics" />
 	<node pkg="autonomous_flight" type="dynamic_inspection_node" name="dynamic_inspection_node" output="screen" />
+	<!-- overrides:=<file.yaml> (Mission Control's flight settings): loaded last, so it wins over the files above -->
+	<arg name="overrides" default=""/>
+	<rosparam if="$(eval arg('overrides') != '')" command="load" file="$(arg overrides)"/>
 </launch>
