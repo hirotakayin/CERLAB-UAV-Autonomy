@@ -126,4 +126,7 @@
 		<node pkg="autonomous_flight" type="open_mission_gui.sh" name="open_mission_gui"/>
 	</group>
 	<node if="$(arg rviz)" pkg="rviz" type="rviz" name="ariadne_rviz" args="-d $(find rl_planner)/rviz/rviz.rviz"/>
+	<!-- overrides:=<file.yaml> (Mission Control's flight settings): loaded last, so it wins over the files above -->
+	<arg name="overrides" default=""/>
+	<rosparam if="$(eval arg('overrides') != '')" command="load" file="$(arg overrides)"/>
 </launch>
