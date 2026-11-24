@@ -1,0 +1,155 @@
+{
+ "t_start": 10.0,
+ "meet": 8.0,
+ "t_meet": 18.0,
+ "height": 1.2,
+ "ramp": 1.5,
+ "stop": 0.8,
+ "texture": "high",
+ "seed": 5,
+ "corridor": {
+  "x": [
+   -55.0,
+   45.0
+  ],
+  "half_width": 3.0,
+  "height": 4.0
+ },
+ "scenarios": {
+  "overtake_c1": {
+   "drone_speed": 1.0,
+   "collision": true,
+   "offset": 0.0,
+   "target": {
+    "start": [
+     -29.55,
+     0.0
+    ],
+    "end": [
+     6.45,
+     0.0
+    ],
+    "speed": 2.0,
+    "t_move": [
+     0.0,
+     18.0
+    ]
+   },
+   "weave": {
+    "t_start": 10.0,
+    "speed": 1.0,
+    "amplitude": 0.0,
+    "height": 1.2,
+    "duration": 20.0
+   }
+  },
+  "overtake_c2": {
+   "drone_speed": 1.0,
+   "collision": true,
+   "offset": 0.0,
+   "target": {
+    "start": [
+     -47.55,
+     0.0
+    ],
+    "end": [
+     6.45,
+     0.0
+    ],
+    "speed": 3.0,
+    "t_move": [
+     0.0,
+     18.0
+    ]
+   },
+   "weave": {
+    "t_start": 10.0,
+    "speed": 1.0,
+    "amplitude": 0.0,
+    "height": 1.2,
+    "duration": 20.0
+   }
+  },
+  "overtake_m1": {
+   "drone_speed": 1.0,
+   "collision": false,
+   "offset": 1.0,
+   "target": {
+    "start": [
+     -28.75,
+     1.0
+    ],
+    "end": [
+     27.25,
+     1.0
+    ],
+    "speed": 2.0,
+    "t_move": [
+     0.0,
+     28.0
+    ]
+   },
+   "weave": {
+    "t_start": 10.0,
+    "speed": 1.0,
+    "amplitude": 0.0,
+    "height": 1.2,
+    "duration": 20.0
+   }
+  },
+  "hover_c": {
+   "drone_speed": 0.0,
+   "collision": true,
+   "offset": 0.0,
+   "target": {
+    "start": [
+     -22.4,
+     0.0
+    ],
+    "end": [
+     -0.8,
+     0.0
+    ],
+    "speed": 1.2,
+    "t_move": [
+     0.0,
+     18.0
+    ]
+   },
+   "weave": {
+    "t_start": 10.0,
+    "speed": 0.0,
+    "amplitude": 0.0,
+    "height": 1.2,
+    "duration": 20.0
+   }
+  },
+  "hover_m": {
+   "drone_speed": 0.0,
+   "collision": false,
+   "offset": 1.0,
+   "target": {
+    "start": [
+     -21.599999999999998,
+     1.0
+    ],
+    "end": [
+     12.000000000000004,
+     1.0
+    ],
+    "speed": 1.2,
+    "t_move": [
+     0.0,
+     28.0
+    ]
+   },
+   "weave": {
+    "t_start": 10.0,
+    "speed": 0.0,
+    "amplitude": 0.0,
+    "height": 1.2,
+    "duration": 20.0
+   }
+  }
+ }
+}
