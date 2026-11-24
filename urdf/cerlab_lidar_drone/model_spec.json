@@ -14,7 +14,7 @@
       "name": "lidar",
       "path": "mid360",
       "moving": true,
-      "tris": 2500
+      "tris": 7000
     },
     {
       "name": "lidar_bracket",
@@ -23,7 +23,7 @@
         "Part 2"
       ],
       "moving": true,
-      "tris": 800
+      "tris": 1500
     },
     {
       "name": "lidar_adapter",
@@ -33,7 +33,7 @@
         0.088
       ],
       "moving": true,
-      "tris": 600,
+      "tris": 1200,
       "_": "plate under the MID-360, drawn at the LiDAR's 23.3 deg"
     },
     {
@@ -48,19 +48,19 @@
       ],
       "any_path": true,
       "moving": true,
-      "tris": 120,
+      "tris": 200,
       "_": "the two link pieces at the LiDAR's 23.5 deg",
       "size_tol": 0.0015
     },
     {
       "name": "mount",
       "path": "Assembly 1",
-      "tris": 800
+      "tris": 2500
     },
     {
       "name": "camera",
       "path": "intel_realsense",
-      "tris": 300
+      "tris": 2500
     },
     {
       "name": "guards",
@@ -72,11 +72,51 @@
         0.002,
         0.221
       ],
-      "tris": 2400
+      "tris": 6000
+    },
+    {
+      "name": "props",
+      "sizes": [
+        [
+          0.141,
+          0.007,
+          0.157
+        ],
+        [
+          0.157,
+          0.007,
+          0.141
+        ]
+      ],
+      "per_instance": true,
+      "tris": 1800,
+      "hubs_cad": [
+        [
+          0.2638,
+          -0.028,
+          -0.2256
+        ],
+        [
+          0.2635,
+          -0.028,
+          0.0678
+        ],
+        [
+          -0.0297,
+          -0.028,
+          -0.2259
+        ],
+        [
+          -0.0301,
+          -0.028,
+          0.0674
+        ]
+      ],
+      "_": "the four 3-blade propellers, one mesh each centred on its motor axis so Mission Control can spin them"
     },
     {
       "name": "frame",
-      "tris": 7000
+      "tris": 22000
     }
   ],
   "hinge": {
@@ -105,31 +145,6 @@
       -0.027
     ]
   },
-  "rotors": {
-    "_doc": "the assembly has no propeller blades (the 221 mm rings are prop guards): drawn 3-blade rotors at the motor centres, half way between the two guard rings. Remove this block if propellers are added to the CAD.",
-    "centres_cad": [
-      [
-        0.2638,
-        -0.2256
-      ],
-      [
-        0.2635,
-        0.0678
-      ],
-      [
-        -0.0297,
-        -0.2259
-      ],
-      [
-        -0.0301,
-        0.0674
-      ]
-    ],
-    "height_cad": -0.0355,
-    "radius": 0.095,
-    "blades": 3,
-    "chord": 0.022
-  },
   "components": [
     {
       "label": "Livox Mid-360",
@@ -153,7 +168,7 @@
     },
     {
       "label": "Motor",
-      "detail": "4 × brushless (KV not in the CAD)",
+      "detail": "4 × brushless · KV not in CAD",
       "at_cad": [
         0.2635,
         -0.0596,

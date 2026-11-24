@@ -55,9 +55,14 @@
   <arg name="spawn_yaw" default="0.0" />
   <node name="spawn_gazebo_model" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model quadcopter -x $(arg spawn_x) -y $(arg spawn_y) -z $(arg spawn_z) -Y $(arg spawn_yaw)" respawn="false" />
 
+  <!-- cad_drone:=true when robot_description is a *_cad.urdf drone (set by an including launch): its sensor frames
+       come from the URDF through robot_state_publisher instead of setupTF's fixed offsets -->
+  <arg name="cad_drone" default="false" />
+  <node if="$(arg cad_drone)" pkg="robot_state_publisher" type="robot_state_publisher" name="drone_state_publisher" />
   <include file="$(find uav_simulator)/launch/setupTF.launch" >
     <arg name="pose_topic" value="/CERLAB/quadcopter/pose" />
     <arg name="lidar_pitch_deg" value="$(arg lidar_pitch_deg)" />
+    <arg name="lidar_tf" value="$(eval not arg('cad_drone'))" />
   </include>
 
   <arg name="keyboard" default="true" />
