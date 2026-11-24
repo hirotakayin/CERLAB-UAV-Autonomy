@@ -1,0 +1,11 @@
+# Closest runnable version of original DEP: voxel-count gain over the whole region and none of the goal-choice changes.
+# Still needs the lidar model and the pit bounds to enter the pit. The stop rule is kept so a run can end.
+DEP:
+  gain_block_size: 0.0
+  tour_enabled: false
+  gain_region_min: [] # empty: the gain region falls back to global_region, on any map
+  gain_region_max: []
+  min_goal_distance: 0.0
+  max_unknown_gap: 0.0
+  depth_bias: 0.0
+  revisit_penalty: 0.0

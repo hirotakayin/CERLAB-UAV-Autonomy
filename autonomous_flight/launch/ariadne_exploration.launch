@@ -1,0 +1,132 @@
+<launch>
+	<!-- ARiADNE baseline (marmotlab/ARiADNE-ROS-Planner, pretrained checkpoint) in an excavation pit, scored like the
+	     CERLAB presets and EPIC. The drone starts on the pit floor and explores at one height (cfg/ariadne/<map>.yaml).
+	     Needs: ~/catkin_ws/src/ARiADNE-ROS-Planner built (package rl_planner), and its Python packages in ~/.venvs/ariadne
+	     (torch, scikit-image; a venv with the system site packages, so rospy still imports). Start the mission from the
+	     dashboard or: rosservice call /exploration/start -->
+	<arg name="map" default="excavation_slab"/> <!-- excavation_simple, excavation_long or excavation_slab -->
+	<arg name="sim" default="true"/> <!-- false when the sim is already up, spawned at the same spot (run_batch.py) -->
+	<arg name="sim_gui" default="false"/>
+	<arg name="lidar_pitch_deg" default="23.5"/>
+	<arg name="gui" default="true"/> <!-- mission dashboard -->
+	<arg name="rviz" default="false"/> <!-- ARiADNE's graph, frontiers and the 2D map it plans on -->
+	<arg name="run_save_dir" default=""/>
+	<arg name="python" default="$(env HOME)/.venvs/ariadne/bin/python"/>
+
+	<!-- ARiADNE's settings, the authors' rl_planner.launch defaults -->
+	<arg name="sensor_range" default="20.0"/> <!-- m, also octomap's max range: DEP's map uses raycast_max_length 20 -->
+	<arg name="map_resolution" default="0.4"/>
+	<arg name="node_resolution" default="2.0"/>
+
+	<!-- where the drone starts: the pit floor, under the spot where the presets' entry waypoints come down -->
+	<arg name="spawn_x" default="$(eval {'excavation_simple': 3.0, 'excavation_long': 10.0, 'excavation_slab': 5.0}[arg('map')])"/>
+	<arg name="spawn_y" default="8.0"/>
+	<arg name="spawn_z" default="$(eval {'excavation_simple': -7.8, 'excavation_long': -9.8, 'excavation_slab': -9.8}[arg('map')])"/>
+	<arg name="cfg" value="$(eval find('autonomous_flight') + '/cfg/' + ('dynamic_exploration_simple' if arg('map') == 'excavation_simple' else 'dynamic_exploration'))"/>
+
+	<include if="$(arg sim)" file="$(find uav_simulator)/launch/start_$(arg map).launch">
+		<arg name="gui" value="$(arg sim_gui)"/>
+		<arg name="keyboard" value="false"/>
+		<arg name="lidar_pitch_deg" value="$(arg lidar_pitch_deg)"/>
+		<arg name="spawn_x" value="$(arg spawn_x)"/>
+		<arg name="spawn_y" value="$(arg spawn_y)"/>
+		<arg name="spawn_z" value="$(arg spawn_z)"/>
+		<arg name="spawn_yaw" value="1.5708"/> <!-- facing +y, into the pit -->
+	</include>
+
+	<!-- the same controller and mission settings as the presets -->
+	<remap from="/mavros/local_position/odom" to="/CERLAB/quadcopter/odom" />
+	<remap from="/mavros/local_position/pose" to="/CERLAB/quadcopter/odom" />
+	<remap from="/mavros/setpoint_raw/local" to="/CERLAB/quadcopter/cmd_acc" />
+	<rosparam file="$(find tracking_controller)/cfg/controller_param.yaml" ns="controller"/>
+	<node pkg="tracking_controller" type="tracking_controller_node" name="tracking_controller_node" output="screen" />
+	<rosparam file="$(arg cfg)/flight_base.yaml" ns="autonomous_flight"/>
+	<group if="$(eval arg('map') != 'excavation_simple')">
+		<rosparam file="$(find autonomous_flight)/cfg/dynamic_exploration/maps/$(arg map).yaml"/>
+	</group>
+	<rosparam file="$(find autonomous_flight)/cfg/ariadne/$(arg map).yaml"/>
+	<param name="autonomous_flight/preset" value="$(arg map)_ariadne"/>
+	<param if="$(eval arg('run_save_dir') != '')" name="autonomous_flight/run_save_dir" value="$(arg run_save_dir)"/>
+
+	<!-- the 2D map ARiADNE plans on: octomap from the Mid-360, projected over the height band in cfg/ariadne/<map>.yaml.
+	     The simulated Mid-360 reports rays with no return as points at the sensor (about 12% of each scan); octomap
+	     would mark them as obstacles along the whole flown path, so points within 0.3 m of the lidar are dropped first -->
+	<node pkg="nodelet" type="nodelet" name="ariadne_cloud_filter" args="standalone pcl/CropBox">
+		<remap from="~input" to="/cloud_registered_body"/>
+		<remap from="~output" to="/ariadne/cloud_filtered"/>
+		<param name="min_x" value="-0.3"/>
+		<param name="max_x" value="0.3"/>
+		<param name="min_y" value="-0.3"/>
+		<param name="max_y" value="0.3"/>
+		<param name="min_z" value="-0.3"/>
+		<param name="max_z" value="0.3"/>
+		<param name="negative" value="true"/>
+		<param name="keep_organized" value="false"/>
+	</node>
+	<node pkg="octomap_server" type="octomap_server_node" name="octomap">
+		<remap from="cloud_in" to="/ariadne/cloud_filtered"/>
+		<param name="frame_id" value="map"/>
+		<param name="base_frame_id" value="base_link"/>
+		<param name="resolution" value="$(arg map_resolution)"/>
+		<param name="filter_ground" value="false"/>
+		<param name="sensor_model/max_range" value="$(arg sensor_range)"/>
+		<param name="sensor_model/hit" value="1"/>
+		<param name="sensor_model/miss" value="0.45"/>
+		<param name="sensor_model/max" value="1"/>
+		<param name="sensor_model/min" value="0.2"/>
+	</node>
+
+	<node pkg="rl_planner" type="rl_planner.py" name="rl_planner" output="screen" launch-prefix="$(arg python)">
+		<remap from="/state_estimation" to="/CERLAB/quadcopter/odom"/>
+		<param name="publish_graph" type="bool" value="$(arg rviz)"/>
+		<param name="node_resolution" value="$(arg node_resolution)"/>
+		<param name="sensor_range" value="$(arg sensor_range)"/>
+		<param name="utility_range_factor" value="0.5"/>
+		<param name="min_utility" type="int" value="3"/>
+		<param name="frontier_downsample_factor" value="1"/>
+		<param name="map_resolution" value="$(arg map_resolution)"/>
+		<param name="waypoint_threshold" value="2.0"/>
+		<param name="next_waypoint_threshold" value="4.0"/>
+		<param name="hard_update_threshold" value="10.0"/>
+		<param name="frontier_cluster_range" value="10.0"/>
+		<param name="enable_save_mode" value="false"/>
+		<param name="enable_dstarlite" value="false"/>
+		<param name="replanning_frequency" value="2.5"/>
+	</node>
+
+	<node pkg="autonomous_flight" type="ariadne_mission.py" name="ariadne_mission" output="screen"/>
+
+	<!-- scoring: the CERLAB map on Gazebo's lidar and odometry, so coverage is computed as in the presets -->
+	<rosparam file="$(arg cfg)/mapping_param.yaml" ns="/occupancy_map"/>
+	<group if="$(eval arg('map') != 'excavation_simple')">
+		<rosparam file="$(find autonomous_flight)/cfg/dynamic_exploration/maps/$(arg map)_mapping.yaml" ns="/occupancy_map"/>
+	</group>
+	<!-- mapping_param.yaml's lidar extrinsic is fixed at 23.5 deg; rebuild it from lidar_pitch_deg so the scoring map
+	     stays right when the tilt changes (nose-down pitch about y, lidar 0.13 m above base_link) -->
+	<param name="/occupancy_map/body_to_camera" type="yaml" value="$(eval '[%f,0,%f,0, 0,1,0,0, %f,0,%f,0.13, 0,0,0,1]' % (cos(radians(float(arg('lidar_pitch_deg')))), sin(radians(float(arg('lidar_pitch_deg')))), -sin(radians(float(arg('lidar_pitch_deg')))), cos(radians(float(arg('lidar_pitch_deg'))))))"/>
+	<node pkg="autonomous_flight" type="epic_monitor_node" name="epic_monitor_node" output="screen">
+		<param name="mission_ns" value="/ariadne_mission"/>
+		<param name="odom_topic" value="/CERLAB/quadcopter/odom"/>
+		<param name="cloud_topic" value=""/> <!-- the map reads /cloud_registered_body itself, already in the lidar frame -->
+		<param name="publish_pose" value="false"/> <!-- the sim publishes /CERLAB/quadcopter/pose -->
+		<param name="kind" value="ariadne"/>
+	</node>
+
+	<!-- what the dashboard reads -->
+	<param name="/DEP/lidar_fov_up" value="52.0"/>
+	<param name="/DEP/lidar_fov_down" value="-7.0"/>
+	<param name="/DEP/lidar_pitch" value="$(arg lidar_pitch_deg)"/>
+	<param name="/dynamic_map/raycast_max_length" value="20.0"/>
+	<node pkg="topic_tools" type="relay" name="voxel_map_relay" args="/occupancy_map/voxel_map /dynamic_map/voxel_map"/>
+	<param name="autonomous_flight/world_sdf" textfile="$(find uav_simulator)/models/$(arg map)/$(arg map).sdf"/>
+	<group if="$(arg gui)">
+		<include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
+		<node pkg="autonomous_flight" type="system_monitor.py" name="system_monitor"/>
+		<node pkg="autonomous_flight" type="recording_fixer.py" name="recording_fixer"/>
+		<node pkg="autonomous_flight" type="open_mission_gui.sh" name="open_mission_gui"/>
+	</group>
+	<node if="$(arg rviz)" pkg="rviz" type="rviz" name="ariadne_rviz" args="-d $(find rl_planner)/rviz/rviz.rviz"/>
+	<!-- overrides:=<file.yaml> (Mission Control's flight settings): loaded last, so it wins over the files above -->
+	<arg name="overrides" default=""/>
+	<rosparam if="$(eval arg('overrides') != '')" command="load" file="$(arg overrides)"/>
+</launch>

@@ -1,0 +1,4 @@
+# sensor:=lidar (default): the tilted Mid-360. Its settings are the defaults in exploration_param.yaml and
+# mapping_param.yaml, so nothing is overridden here.
+DEP:
+  sensor_type: lidar # the same as exploration_param.yaml: no overrides

@@ -1,0 +1,63 @@
+#odom_topic: "/CERLAB/quadcopter/odom"
+odom_topic: "/mavros/local_position/odom"
+
+local_region_min: [-6, -6, -6]
+local_region_max: [6, 6, 6]
+global_region_min: [-1.0, 1.0, -14.8] # excavation1: pit x [0, 12], y [5, 29], z [-16, 0] plus the start apron. Lowest goal 1.2 m above the floor, as in excavation_simple
+global_region_max: [13.0, 30.0, 3.0]
+# Only the pit interior counts as gain and frontiers: unknown voxels in the walls or under the ground never clear
+gain_region_min: [0.2, 5.2, -16.2] # reaches below the floor so floor hits fall inside blocks; sized from this pit's known depth
+gain_region_max: [11.8, 28.8, 0.0]
+min_goal_distance: 1.5 # m, skip closer goals while further ones have gain
+max_unknown_gap: 0.6 # m, unknown stretch allowed on a roadmap edge; rays are sparse near the lower FOV edge. 0 = strict DEP
+depth_bias: 4.0 # goal score x (1 + bias * depth^2), depth 0 at the top of the gain region, 1 at the bottom; 0 = plain DEP
+gain_block_size: 0.6 # m, gain = unexplored blocks, not unknown voxels; 0 = plain DEP voxel count
+tour_enabled: false # also a toggle on the dashboard: fly an ordered route through every area left, needs gain_block_size
+tour_bin_size: 3.0 # m, side of an area
+tour_min_cells: 3 # smaller leftovers are not worth a trip
+tour_min_share: 0.25 # areas under this share of the largest wait, so the tour goes for the big unknowns first and small leftovers last
+tour_max_visits: 3 # viewpoints tried for an area before giving up on it
+revisit_penalty: 2.0 # goal score / (1 + penalty * earlier goals within 1 m); 0 = plain DEP
+
+# Reduced per-iteration sampling budget to lower graph update spikes
+local_sample_thresh: 100        # Down from 200
+global_sample_thresh: 50        # Down from 100
+frontier_sample_thresh: 50      # Down from 100
+
+# Node spacing vs connection distance: max_connect_dist must be well above dist_thresh (upstream 0.8 / 1.5)
+# or the roadmap falls apart (1.5 / 2.0 left 554 nodes with 77 edges)
+dist_thresh: 1.2                # min distance between nodes (upstream 0.8)
+safe_distance_xy: 0.5
+safe_distance_z: 0.3 # goals keep this much more above and below obstacles
+safe_distance_check_unknown: true # nodes only in known-free space; edges must be known free, so unknown nodes never connect
+
+# Sensor model for information gain: camera or lidar
+sensor_type: lidar
+# Camera Parameters (sensor_type: camera); vertical_FOV also limits roadmap edge slope (vertical_FOV/2) in both modes
+horizontal_FOV: 1.57
+vertical_FOV: 1.57
+# Lidar Parameters (sensor_type: lidar), degrees: Mid-360 elevation FOV, pitched nose-down
+lidar_fov_up: 52.0
+lidar_fov_down: -7.0
+lidar_pitch: 23.5
+dmin: 0.3
+dmax: 10 # info-gain range, the same for every preset so they compare fairly (counting voxels at 10 m took ~13 s per plan)
+
+# Steepest roadmap edge (deg) when flying nose-first: the lidar's lowest and highest rays straight ahead
+max_edge_down_angle: 30.5 # lidar_fov_down + lidar_pitch (7 + 23.5)
+max_edge_up_angle: 28.5 # lidar_fov_up - lidar_pitch (52 - 23.5)
+static_environment: true # also a toggle on the dashboard. true = nothing moves: any slope, if the whole edge is known free. false = slopes within what the lidar sees ahead
+
+# Graph Connectivity
+nearest_neighbor_number: 8          # Down from 15
+frontier_nearest_neighbor_number: 8 # Down from 15
+max_connect_dist: 2.5               # ~2x dist_thresh (upstream 1.5 for 0.8)
+num_yaw_angles: 8                   # Down from 32 (Massive speedup)
+
+# Goal Candidate
+min_voxel_thresh: 0.5
+min_goal_candidates: 3          # Down from 5
+max_goal_candidates: 8          # Down from 10
+
+information_gain_update_distance: 1.5
+yaw_penalty_weight: 1.0

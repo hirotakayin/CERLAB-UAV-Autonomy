@@ -1,0 +1,4 @@
+# Gain with strict roadmap edges and nodes: tests whether max_unknown_gap is needed to descend into the pit.
+DEP:
+  tour_enabled: false
+  max_unknown_gap: 0.0

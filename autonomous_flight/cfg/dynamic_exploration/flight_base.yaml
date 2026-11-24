@@ -1,0 +1,33 @@
+use_fake_detector: true
+takeoff_height: 1.0 # m
+desired_velocity: 1.0 # m/s
+desired_acceleration: 1.0 # m/s^2
+desired_angular_velocity: 1.0 # rad/s
+waypoint_stablize_time: 0.0
+initial_scan: false
+replan_time_for_dynamic_obstacles: 0.3
+free_range: [1, 1, 1]
+reach_goal_distance: 0.1
+
+# Waypoints flown after takeoff, before DEP exploration starts: [x, y, z, yaw_deg] per waypoint.
+# Empty list = start exploring straight away.
+# excavation1: over the near rim, then down the first bay (x 3, y 8: 3 m from the wall,
+# the x=6 columns and the y=11 beams), facing +y into the pit. Hand over to DEP at -2 m.
+# Stays at 1 m until inside the rim: the inflated ground reaches about 0.7 m
+initial_waypoints: [3.0, 3.5,  1.0, 90.0,
+                    3.0, 8.0,  1.0, 90.0,
+                    3.0, 8.0, -2.0, 90.0]
+
+# Mission GUI
+progress_region_min: [0.2, 5.2, -15.8] # % explored = known share of this box (excavation1 pit interior, floor to rim)
+progress_region_max: [11.8, 28.8, 0.0]
+floor_z: -16.0 # m, top of the pit floor, only scores the run (% floor covered); the planner and stop rule do not use it
+# Exploration is done when this many plans in a row each add less than complete_min_gain percentage points of
+# coverage (pit block %). Then: home.
+complete_stall_plans: 3 # 0 = never stop on its own
+complete_min_gain: 0.25
+stuck_land_time: 15.0 # s hovering with no way home before landing where it is, so an unattended run still ends
+max_exploration_failures: 5 # consecutive failed DEP plans before exploration counts as complete -> return home and land
+inspect_hold_time: 3.0 # s at an inspection viewpoint
+inspect_distance: 2.5 # m from the selected point
+land_clearance: 0.4 # m above the mapped ground before cutting motors

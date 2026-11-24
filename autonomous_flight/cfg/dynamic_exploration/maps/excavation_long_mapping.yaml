@@ -1,0 +1,5 @@
+# map size for excavation_long, loaded into the occupancy map of the DEP planner (/dynamic_map) and of EPIC's scoring node (/occupancy_map)
+ground_height: -10.5 # m, just below the pit floor
+map_size: [46, 90, 15] # x [-23, 23], y [-45, 45]; z [-10.5, 4.5]
+local_update_range: [20, 20, 15]
+local_map_size: [46, 90, 15]
