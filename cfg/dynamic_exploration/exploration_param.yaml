@@ -27,7 +27,7 @@ frontier_sample_thresh: 50      # Down from 100
 # Node spacing vs connection distance: max_connect_dist must be well above dist_thresh (upstream 0.8 / 1.5)
 # or the roadmap falls apart (1.5 / 2.0 left 554 nodes with 77 edges)
 dist_thresh: 1.2                # min distance between nodes (upstream 0.8)
-safe_distance_xy: 0.3
+safe_distance_xy: 0.5
 safe_distance_z: 0.3 # goals keep this much more above and below obstacles
 safe_distance_check_unknown: true # nodes only in known-free space; edges must be known free, so unknown nodes never connect
 
@@ -41,7 +41,7 @@ lidar_fov_up: 52.0
 lidar_fov_down: -7.0
 lidar_pitch: 23.5
 dmin: 0.3
-dmax: 7.0 # info-gain range, the same for every preset so they compare fairly (counting voxels at 10 m took ~13 s per plan)
+dmax: 10 # info-gain range, the same for every preset so they compare fairly (counting voxels at 10 m took ~13 s per plan)
 
 # Steepest roadmap edge (deg) when flying nose-first: the lidar's lowest and highest rays straight ahead
 max_edge_down_angle: 30.5 # lidar_fov_down + lidar_pitch (7 + 23.5)
