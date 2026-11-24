@@ -1,0 +1,366 @@
+{
+ "name": "cerlab_lidar_drone",
+ "groups": {
+  "lidar": {
+   "parts": 16,
+   "tris_cad": 66043,
+   "tris": 8012,
+   "moving": true,
+   "bounds": [
+    [
+     -0.0737,
+     -0.0331,
+     0.0093
+    ],
+    [
+     -0.0007,
+     0.0321,
+     0.0715
+    ]
+   ]
+  },
+  "lidar_bracket": {
+   "parts": 1,
+   "tris_cad": 5640,
+   "tris": 1500,
+   "moving": true,
+   "bounds": [
+    [
+     -0.0641,
+     -0.0246,
+     -0.0051
+    ],
+    [
+     0.0089,
+     0.0238,
+     0.0096
+    ]
+   ]
+  },
+  "lidar_adapter": {
+   "parts": 1,
+   "tris_cad": 2348,
+   "tris": 1200,
+   "moving": true,
+   "bounds": [
+    [
+     -0.0759,
+     -0.0429,
+     0.0096
+    ],
+    [
+     0.0091,
+     0.0421,
+     0.0346
+    ]
+   ]
+  },
+  "lidar_links": {
+   "parts": 2,
+   "tris_cad": 680,
+   "tris": 198,
+   "moving": true,
+   "bounds": [
+    [
+     -0.0372,
+     -0.0084,
+     -0.0233
+    ],
+    [
+     -0.0302,
+     0.0084,
+     0.0052
+    ]
+   ]
+  },
+  "mount": {
+   "parts": 2,
+   "tris_cad": 10884,
+   "tris": 2498,
+   "moving": false,
+   "bounds": [
+    [
+     -0.0327,
+     -0.0326,
+     0.0765
+    ],
+    [
+     0.0324,
+     0.0324,
+     0.1013
+    ]
+   ]
+  },
+  "camera": {
+   "parts": 7,
+   "tris_cad": 12384,
+   "tris": 7280,
+   "moving": false,
+   "bounds": [
+    [
+     0.0395,
+     -0.0451,
+     -0.0143
+    ],
+    [
+     0.064,
+     0.0456,
+     0.0104
+    ]
+   ]
+  },
+  "guards": {
+   "parts": 8,
+   "tris_cad": 20640,
+   "tris": 5996,
+   "moving": false,
+   "bounds": [
+    [
+     -0.2566,
+     -0.2567,
+     0.0158
+    ],
+    [
+     0.2564,
+     0.2565,
+     0.0411
+    ]
+   ]
+  },
+  "props_0": {
+   "parts": 1,
+   "tris": 1798,
+   "moving": false,
+   "bounds": [
+    [
+     0.095,
+     0.0713,
+     0.0318
+    ],
+    [
+     0.2363,
+     0.2281,
+     0.0391
+    ]
+   ],
+   "origin": [
+    0.1468,
+    0.1465,
+    0.0355
+   ],
+   "rotor": true
+  },
+  "props_1": {
+   "parts": 1,
+   "tris": 1798,
+   "moving": false,
+   "bounds": [
+    [
+     0.0712,
+     -0.2366,
+     0.0321
+    ],
+    [
+     0.228,
+     -0.0954,
+     0.0394
+    ]
+   ],
+   "origin": [
+    0.1464,
+    -0.1471,
+    0.0355
+   ],
+   "rotor": true
+  },
+  "props_2": {
+   "parts": 1,
+   "tris": 1798,
+   "moving": false,
+   "bounds": [
+    [
+     -0.2364,
+     -0.2283,
+     0.032
+    ],
+    [
+     -0.0951,
+     -0.0715,
+     0.0393
+    ]
+   ],
+   "origin": [
+    -0.1469,
+    -0.1467,
+    0.0355
+   ],
+   "rotor": true
+  },
+  "props_3": {
+   "parts": 1,
+   "tris": 1798,
+   "moving": false,
+   "bounds": [
+    [
+     -0.2282,
+     0.0951,
+     0.032
+    ],
+    [
+     -0.0713,
+     0.2363,
+     0.0393
+    ]
+   ],
+   "origin": [
+    -0.1466,
+    0.1468,
+    0.0355
+   ],
+   "rotor": true
+  },
+  "frame": {
+   "parts": 59,
+   "tris_cad": 96380,
+   "tris": 22754,
+   "moving": false,
+   "bounds": [
+    [
+     -0.2263,
+     -0.2265,
+     -0.1266
+    ],
+    [
+     0.2262,
+     0.2263,
+     0.0762
+    ]
+   ]
+  }
+ },
+ "hinge_xyz": [
+  0.0239,
+  0.0,
+  0.0876
+ ],
+ "hinge_axis": [
+  0,
+  1,
+  0
+ ],
+ "cad_tilt_deg": 23.5,
+ "components": [
+  {
+   "label": "Livox Mid-360",
+   "detail": "360\u00b0 LiDAR \u00b7 tilts on the front hinge",
+   "edit": "tilt",
+   "xyz": [
+    -0.0372,
+    -0.0005,
+    0.0715
+   ],
+   "moving": true
+  },
+  {
+   "label": "Front hinge",
+   "detail": "LiDAR tilt axis",
+   "xyz": [
+    0.0239,
+    0.0,
+    0.0876
+   ],
+   "moving": false
+  },
+  {
+   "label": "Intel RealSense",
+   "detail": "forward depth camera",
+   "xyz": [
+    0.0518,
+    0.0003,
+    0.0104
+   ],
+   "moving": false
+  },
+  {
+   "label": "Motor",
+   "detail": "4 \u00d7 brushless \u00b7 KV not in CAD",
+   "xyz": [
+    0.1468,
+    0.1465,
+    0.0039
+   ],
+   "moving": false
+  },
+  {
+   "label": "Prop guard",
+   "detail": "221 mm rings, two per motor",
+   "xyz": [
+    0.0,
+    0.257,
+    0.0285
+   ],
+   "moving": false
+  },
+  {
+   "label": "Flight controller",
+   "detail": "PX4 \u00b7 position not confirmed",
+   "confirmed": false,
+   "xyz": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "moving": false
+  },
+  {
+   "label": "Onboard computer",
+   "detail": "Jetson \u00b7 position not confirmed",
+   "confirmed": false,
+   "xyz": [
+    -0.001,
+    0.0,
+    0.0515
+   ],
+   "moving": false
+  },
+  {
+   "label": "Battery",
+   "detail": "position not confirmed",
+   "confirmed": false,
+   "xyz": [
+    -0.017,
+    0.0,
+    -0.0575
+   ],
+   "moving": false
+  }
+ ],
+ "lidar_from_hinge": [
+  -0.04276,
+  -0.0002,
+  0.00932
+ ],
+ "lidar_origin_confirmed": false,
+ "camera_xyz": [
+  0.052,
+  0.0,
+  -0.0015
+ ],
+ "bounds": [
+  [
+   -0.2566,
+   -0.2567,
+   -0.1266
+  ],
+  [
+   0.2564,
+   0.2565,
+   0.1705
+  ]
+ ],
+ "lidar_xyz_at_cad_tilt": [
+  -0.0116,
+  -0.0002,
+  0.1132
+ ]
+}

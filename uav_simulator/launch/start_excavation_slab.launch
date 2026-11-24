@@ -1,0 +1,60 @@
+<launch>
+  <arg name="paused" value="false"/>
+  <arg name="verbose" value="false"/>
+  <arg name="use_sim_time" value="true"/>
+  <arg name="debug" value="false" />
+  <arg name="lidar" default="true" />
+  <arg name="gui" default="true" />
+
+  <arg name="world_name" value="$(find uav_simulator)/worlds/excavation_slab/excavation_slab.world" />
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch" >
+        <arg name="paused" value="$(arg paused)"/>
+        <arg name="world_name" value="$(arg world_name)"/>
+        <arg name="verbose" value="$(arg verbose)"/>
+        <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+        <arg name="debug" value="$(arg debug)" />
+        <arg name="gui" value="$(arg gui)" />
+  </include>
+
+  <!-- lidar:=true spawns the drone with the tilted Mid-360 (quadcopter_lidar.urdf) as well as the depth camera -->
+  <!-- sensor:=omni swaps the Mid-360 for the ideal 360 depth sensor (opti360): quadcopter_omni.urdf, raw points on
+       /omni/cloud_raw, and flow_limited_cloud.py publishing what optic flow could range on /omni/cloud_flow -->
+  <arg name="sensor" default="lidar" />
+  <arg name="flow_range_s" default="10.0" />
+  <!-- the Mid-360's nose-down tilt in degrees (URDF and TF; 23.5 on the real drone) -->
+  <arg name="lidar_pitch_deg" default="23.5" />
+  <group if="$(eval arg('lidar') and arg('sensor') == 'lidar')">
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter_lidar.urdf' lidar_pitch_deg:=$(arg lidar_pitch_deg)" />
+  </group>
+  <group if="$(eval arg('sensor') == 'omni')">
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter_omni.urdf'" />
+    <node pkg="uav_simulator" type="flow_limited_cloud.py" name="flow_limited_cloud">
+      <param name="flow_range_s" value="$(arg flow_range_s)" />
+    </node>
+  </group>
+  <group if="$(eval not arg('lidar') and arg('sensor') == 'lidar')">
+    <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/quadcopter.urdf'" />
+  </group>
+
+  <node pkg="topic_tools" type="throttle" name="gt_pose_throttle" args="messages /CERLAB/quadcopter/pose_raw 30 /CERLAB/quadcopter/pose"/>
+  <node pkg="topic_tools" type="throttle" name="gt_vel_throttle" args="messages /CERLAB/quadcopter/vel_raw 30 /CERLAB/quadcopter/vel"/>
+  <node pkg="topic_tools" type="throttle" name="gt_acc_throttle" args="messages /CERLAB/quadcopter/acc_raw 30 /CERLAB/quadcopter/acc"/>
+  <node pkg="topic_tools" type="throttle" name="gt_odom_throttle" args="messages /CERLAB/quadcopter/odom_raw 30 /CERLAB/quadcopter/odom"/>
+
+  <!-- where the drone starts: the near apron by default; ariadne_exploration.launch starts it on the pit floor -->
+  <arg name="spawn_x" default="5.0" />
+  <arg name="spawn_y" default="2.0" />
+  <arg name="spawn_z" default="0.2" />
+  <arg name="spawn_yaw" default="0.0" />
+  <node name="spawn_gazebo_model" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model quadcopter -x $(arg spawn_x) -y $(arg spawn_y) -z $(arg spawn_z) -Y $(arg spawn_yaw)" respawn="false" />
+
+  <include file="$(find uav_simulator)/launch/setupTF.launch" >
+    <arg name="pose_topic" value="/CERLAB/quadcopter/pose" />
+    <arg name="lidar_pitch_deg" value="$(arg lidar_pitch_deg)" />
+  </include>
+
+  <arg name="keyboard" default="true" />
+  <node if="$(arg keyboard)" name="keyboard_control" pkg="uav_simulator" type="keyboard_control" />
+
+  </launch>

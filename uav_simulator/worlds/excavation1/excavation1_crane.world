@@ -1,0 +1,42 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="Excavation_Pit">
+    <include>
+      <uri>model://sun</uri>
+    </include>
+    <include>
+      <uri>model://excavation1</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+    <!-- The fake detector tracks models named obstacle*, and reads the size from the last 11 characters of the name.
+         x 9, y 14: the middle of a bay, 2.35 m clear of the beams at y 11 and y 17. -->
+    <model name="obstacle_crane_1.0_1.0_1.0">
+      <pose>9 14 3 0 0 0</pose>
+      <link name="load">
+        <gravity>0</gravity>
+        <collision name="load_collision">
+          <geometry><box><size>1 1 1</size></box></geometry>
+        </collision>
+        <visual name="load_visual">
+          <geometry><box><size>1 1 1</size></box></geometry>
+          <material><ambient>0.99 0.71 0.08 1</ambient><diffuse>0.99 0.71 0.08 1</diffuse></material>
+        </visual>
+        <!-- Drawn only: the lidar and the detector do not see the cable -->
+        <visual name="cable_visual">
+          <pose>0 0 15.5 0 0 0</pose>
+          <geometry><cylinder><radius>0.02</radius><length>30</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+      <plugin name="crane_motion" filename="libobstaclePathPlugin.so">
+        <loop>0</loop>
+        <velocity>0.25</velocity>
+        <orientation>0</orientation>
+        <path>
+          <waypoint>9 14 3</waypoint>
+          <waypoint>9 14 -14</waypoint>
+        </path>
+      </plugin>
+    </model>
+  </world>
+</sdf>

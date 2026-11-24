@@ -1,0 +1,218 @@
+{
+  "_doc": "How mission_control/tools/cad_to_model.py turns the Onshape assembly (Assembly 2.step, read by cad_assembly.py into parts.npz) into simplified meshes for the URDF and Mission Control. CAD frame: +Y up, +Z forward (the RealSense side), +X left. Lengths in metres, CAD coordinates unless noted.",
+  "name": "cerlab_lidar_drone",
+  "cad_up": "+Y",
+  "cad_forward": "+Z",
+  "base_link_cad": [
+    0.117,
+    -0.0635,
+    -0.079
+  ],
+  "_base_link": "body centre: middle of the prop square in X/Z, half way between the two central deck plates (Y -0.085 and -0.042)",
+  "groups": [
+    {
+      "name": "lidar",
+      "path": "mid360",
+      "moving": true,
+      "tris": 7000
+    },
+    {
+      "name": "lidar_bracket",
+      "path": "Assembly 1",
+      "names": [
+        "Part 2"
+      ],
+      "moving": true,
+      "tris": 1500
+    },
+    {
+      "name": "lidar_adapter",
+      "size": [
+        0.085,
+        0.057,
+        0.088
+      ],
+      "moving": true,
+      "tris": 1200,
+      "_": "plate under the MID-360, drawn at the LiDAR's 23.3 deg"
+    },
+    {
+      "name": "lidar_links",
+      "names": [
+        "Part 3"
+      ],
+      "size": [
+        0.005,
+        0.027,
+        0.016
+      ],
+      "any_path": true,
+      "moving": true,
+      "tris": 200,
+      "_": "the two link pieces at the LiDAR's 23.5 deg",
+      "size_tol": 0.0015
+    },
+    {
+      "name": "mount",
+      "path": "Assembly 1",
+      "tris": 2500
+    },
+    {
+      "name": "camera",
+      "path": "intel_realsense",
+      "tris": 2500
+    },
+    {
+      "name": "guards",
+      "names": [
+        "Part 1"
+      ],
+      "size": [
+        0.221,
+        0.002,
+        0.221
+      ],
+      "tris": 6000
+    },
+    {
+      "name": "props",
+      "sizes": [
+        [
+          0.141,
+          0.007,
+          0.157
+        ],
+        [
+          0.157,
+          0.007,
+          0.141
+        ]
+      ],
+      "per_instance": true,
+      "tris": 1800,
+      "hubs_cad": [
+        [
+          0.2638,
+          -0.028,
+          -0.2256
+        ],
+        [
+          0.2635,
+          -0.028,
+          0.0678
+        ],
+        [
+          -0.0297,
+          -0.028,
+          -0.2259
+        ],
+        [
+          -0.0301,
+          -0.028,
+          0.0674
+        ]
+      ],
+      "_": "the four 3-blade propellers, one mesh each centred on its motor axis so Mission Control can spin them"
+    },
+    {
+      "name": "frame",
+      "tris": 22000
+    }
+  ],
+  "hinge": {
+    "point": [
+      0.117,
+      0.0241,
+      -0.0551
+    ],
+    "_point": "centre of the 2.8 mm pin at the front of the LiDAR mount (fitted from the CAD)",
+    "tilt_in_cad_deg": 23.5,
+    "_tilt": "MID-360 base plate normal is 23.5 deg from vertical, top toward the front"
+  },
+  "lidar_link": {
+    "base_centre_cad": [
+      0.1168,
+      0.0497,
+      -0.0906
+    ],
+    "origin_above_base_m": 0.0,
+    "_origin": "Livox's point-cloud origin above the MID-360's mounting face: not confirmed yet (manual's dimension drawing); 0 puts lidar_link on the mounting face"
+  },
+  "camera_link": {
+    "centre_cad": [
+      0.117,
+      -0.065,
+      -0.027
+    ]
+  },
+  "components": [
+    {
+      "label": "Livox Mid-360",
+      "detail": "360° LiDAR · tilts on the front hinge",
+      "group": "lidar",
+      "edit": "tilt"
+    },
+    {
+      "label": "Front hinge",
+      "detail": "LiDAR tilt axis",
+      "at_cad": [
+        0.117,
+        0.0241,
+        -0.0551
+      ]
+    },
+    {
+      "label": "Intel RealSense",
+      "detail": "forward depth camera",
+      "group": "camera"
+    },
+    {
+      "label": "Motor",
+      "detail": "4 × brushless · KV not in CAD",
+      "at_cad": [
+        0.2635,
+        -0.0596,
+        0.0678
+      ]
+    },
+    {
+      "label": "Prop guard",
+      "detail": "221 mm rings, two per motor",
+      "at_cad": [
+        0.374,
+        -0.035,
+        -0.079
+      ]
+    },
+    {
+      "label": "Flight controller",
+      "detail": "PX4 · position not confirmed",
+      "at_cad": [
+        0.117,
+        -0.0635,
+        -0.079
+      ],
+      "confirmed": false
+    },
+    {
+      "label": "Onboard computer",
+      "detail": "Jetson · position not confirmed",
+      "at_cad": [
+        0.117,
+        -0.012,
+        -0.08
+      ],
+      "confirmed": false
+    },
+    {
+      "label": "Battery",
+      "detail": "position not confirmed",
+      "at_cad": [
+        0.117,
+        -0.121,
+        -0.096
+      ],
+      "confirmed": false
+    }
+  ]
+}

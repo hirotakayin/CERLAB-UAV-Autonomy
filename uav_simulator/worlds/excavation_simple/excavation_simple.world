@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="Excavation_Simple">
+    <include>
+      <uri>model://sun</uri>
+    </include>
+    <include>
+      <uri>model://excavation_simple</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+  </world>
+</sdf>

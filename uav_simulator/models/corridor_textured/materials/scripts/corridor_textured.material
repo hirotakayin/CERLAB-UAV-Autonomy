@@ -1,0 +1,493 @@
+material Corridor/Wall0
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.75 0.75 0.75 1
+      diffuse 1 1 1 1
+      specular 0.05 0.05 0.05 1 8
+      texture_unit
+      {
+        texture concrete_wall_0.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Wall1
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.75 0.75 0.75 1
+      diffuse 1 1 1 1
+      specular 0.05 0.05 0.05 1 8
+      texture_unit
+      {
+        texture concrete_wall_1.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Wall2
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.75 0.75 0.75 1
+      diffuse 1 1 1 1
+      specular 0.05 0.05 0.05 1 8
+      texture_unit
+      {
+        texture concrete_wall_2.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Wall3
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.75 0.75 0.75 1
+      diffuse 1 1 1 1
+      specular 0.05 0.05 0.05 1 8
+      texture_unit
+      {
+        texture concrete_wall_3.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Wall4
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.75 0.75 0.75 1
+      diffuse 1 1 1 1
+      specular 0.05 0.05 0.05 1 8
+      texture_unit
+      {
+        texture concrete_wall_4.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Wall5
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.75 0.75 0.75 1
+      diffuse 1 1 1 1
+      specular 0.05 0.05 0.05 1 8
+      texture_unit
+      {
+        texture concrete_wall_5.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Floor0
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.70 0.70 0.70 1
+      diffuse 1 1 1 1
+      specular 0.15 0.15 0.15 1 8
+      texture_unit
+      {
+        texture concrete_floor_0.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Floor1
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.70 0.70 0.70 1
+      diffuse 1 1 1 1
+      specular 0.15 0.15 0.15 1 8
+      texture_unit
+      {
+        texture concrete_floor_1.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Floor2
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.70 0.70 0.70 1
+      diffuse 1 1 1 1
+      specular 0.15 0.15 0.15 1 8
+      texture_unit
+      {
+        texture concrete_floor_2.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Plywood
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.75 0.75 0.75 1
+      diffuse 1 1 1 1
+      specular 0.05 0.05 0.05 1 8
+      texture_unit
+      {
+        texture plywood.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting00
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_00.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting01
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_01.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting02
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_02.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting03
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_03.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting04
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_04.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting05
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_05.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting06
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_06.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting07
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_07.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting08
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_08.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting09
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_09.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting10
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_10.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting11
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_11.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting12
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_12.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting13
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_13.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting14
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_14.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Corridor/Painting15
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1
+      diffuse 1 1 1 1
+      specular 0.20 0.20 0.20 1 8
+      texture_unit
+      {
+        texture painting_15.png
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}

@@ -1,0 +1,194 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="excavation_long">
+    <static>true</static>
+
+    <link name="excavation_link">
+      <inertial>
+        <mass>1.0</mass>
+        <inertia><ixx>1e-6</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-6</iyy><iyz>0</iyz><izz>1e-6</izz></inertia>
+      </inertial>
+
+      <collision name="ground_collision">
+        <pose>7 20 -10.05 0 0 0</pose>
+        <geometry><box><size>14 30 0.1</size></box></geometry>
+      </collision>
+      <visual name="ground_visual">
+        <pose>7 20 -10.05 0 0 0</pose>
+        <geometry><box><size>14 30 0.1</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="top_ground_left_collision">
+        <pose>-5 20 -0.05 0 0 0</pose>
+        <geometry><box><size>10 50 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_left_visual">
+        <pose>-5 20 -0.05 0 0 0</pose>
+        <geometry><box><size>10 50 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="top_ground_right_collision">
+        <pose>19 20 -0.05 0 0 0</pose>
+        <geometry><box><size>10 50 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_right_visual">
+        <pose>19 20 -0.05 0 0 0</pose>
+        <geometry><box><size>10 50 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="top_ground_near_collision">
+        <pose>7 0 -0.05 0 0 0</pose>
+        <geometry><box><size>14 10 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_near_visual">
+        <pose>7 0 -0.05 0 0 0</pose>
+        <geometry><box><size>14 10 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="top_ground_far_collision">
+        <pose>7 40 -0.05 0 0 0</pose>
+        <geometry><box><size>14 10 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_far_visual">
+        <pose>7 40 -0.05 0 0 0</pose>
+        <geometry><box><size>14 10 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="wall_left_collision">
+        <pose>-0.25 20 -5 0 0 0</pose>
+        <geometry><box><size>0.5 30 10</size></box></geometry>
+      </collision>
+      <visual name="wall_left_visual">
+        <pose>-0.25 20 -5 0 0 0</pose>
+        <geometry><box><size>0.5 30 10</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="wall_right_collision">
+        <pose>14.25 20 -5 0 0 0</pose>
+        <geometry><box><size>0.5 30 10</size></box></geometry>
+      </collision>
+      <visual name="wall_right_visual">
+        <pose>14.25 20 -5 0 0 0</pose>
+        <geometry><box><size>0.5 30 10</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="wall_near_collision">
+        <pose>7 4.75 -5 0 0 0</pose>
+        <geometry><box><size>15 0.5 10</size></box></geometry>
+      </collision>
+      <visual name="wall_near_visual">
+        <pose>7 4.75 -5 0 0 0</pose>
+        <geometry><box><size>15 0.5 10</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="wall_far_collision">
+        <pose>7 35.25 -5 0 0 0</pose>
+        <geometry><box><size>15 0.5 10</size></box></geometry>
+      </collision>
+      <visual name="wall_far_visual">
+        <pose>7 35.25 -5 0 0 0</pose>
+        <geometry><box><size>15 0.5 10</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="collapse_a_front_collision">
+        <pose>3.5 11.25 -5 0 0 0</pose>
+        <geometry><box><size>7 0.5 10</size></box></geometry>
+      </collision>
+      <visual name="collapse_a_front_visual">
+        <pose>3.5 11.25 -5 0 0 0</pose>
+        <geometry><box><size>7 0.5 10</size></box></geometry>
+        <material>
+          <ambient>0.45 0.33 0.22 1.0</ambient>
+          <diffuse>0.45 0.33 0.22 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="collapse_a_side_collision">
+        <pose>6.75 15 -5 0 0 0</pose>
+        <geometry><box><size>0.5 7 10</size></box></geometry>
+      </collision>
+      <visual name="collapse_a_side_visual">
+        <pose>6.75 15 -5 0 0 0</pose>
+        <geometry><box><size>0.5 7 10</size></box></geometry>
+        <material>
+          <ambient>0.45 0.33 0.22 1.0</ambient>
+          <diffuse>0.45 0.33 0.22 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="collapse_a_partition_collision">
+        <pose>4.75 16.25 -5 0 0 0</pose>
+        <geometry><box><size>3.5 0.5 10</size></box></geometry>
+      </collision>
+      <visual name="collapse_a_partition_visual">
+        <pose>4.75 16.25 -5 0 0 0</pose>
+        <geometry><box><size>3.5 0.5 10</size></box></geometry>
+        <material>
+          <ambient>0.45 0.33 0.22 1.0</ambient>
+          <diffuse>0.45 0.33 0.22 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="collapse_b_heap_collision">
+        <pose>7.75 27 -7.5 0 0 0</pose>
+        <geometry><box><size>0.5 8 5</size></box></geometry>
+      </collision>
+      <visual name="collapse_b_heap_visual">
+        <pose>7.75 27 -7.5 0 0 0</pose>
+        <geometry><box><size>0.5 8 5</size></box></geometry>
+        <material>
+          <ambient>0.45 0.33 0.22 1.0</ambient>
+          <diffuse>0.45 0.33 0.22 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="collapse_b_roof_collision">
+        <pose>10.75 27 -4.75 0 0 0</pose>
+        <geometry><box><size>6.5 8 0.5</size></box></geometry>
+      </collision>
+      <visual name="collapse_b_roof_visual">
+        <pose>10.75 27 -4.75 0 0 0</pose>
+        <geometry><box><size>6.5 8 0.5</size></box></geometry>
+        <material>
+          <ambient>0.45 0.33 0.22 1.0</ambient>
+          <diffuse>0.45 0.33 0.22 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="collapse_b_end_collision">
+        <pose>11 22.75 -7.25 0 0 0</pose>
+        <geometry><box><size>6 0.5 5.5</size></box></geometry>
+      </collision>
+      <visual name="collapse_b_end_visual">
+        <pose>11 22.75 -7.25 0 0 0</pose>
+        <geometry><box><size>6 0.5 5.5</size></box></geometry>
+        <material>
+          <ambient>0.45 0.33 0.22 1.0</ambient>
+          <diffuse>0.45 0.33 0.22 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

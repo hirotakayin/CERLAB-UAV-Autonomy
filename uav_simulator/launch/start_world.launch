@@ -1,0 +1,58 @@
+<launch>
+  <!-- Any world with any drone: the one launch file behind Mission Control's world and drone galleries.
+         roslaunch uav_simulator start_world.launch world:=excavation_long/excavation_long.world drone:=quadcopter_lidar.urdf
+       world: path under worlds/; drone: a file in urdf/ (xacro, so lidar_pitch_deg applies where the URDF uses it).
+       The per-world start_*.launch files differ from this only in their world and spawn pose, and still work. -->
+  <arg name="world" default="corridor/corridor_dynamic_9.world" />
+  <arg name="drone" default="quadcopter_lidar.urdf" />
+  <arg name="lidar_pitch_deg" default="23.5" />
+  <arg name="spawn_x" default="0.0" />
+  <arg name="spawn_y" default="0.0" />
+  <arg name="spawn_z" default="0.1" />
+  <arg name="spawn_yaw" default="0.0" />
+  <arg name="gui" default="true" />
+  <arg name="keyboard" default="false" /> <!-- the Qt keyboard window; Mission Control drives the drone from the browser instead -->
+  <arg name="flow_range_s" default="10.0" />
+  <!-- more xacro args for the drone, as name=value pairs (roslaunch takes no ':=' inside a value), e.g.
+       xacro_args:="insta360_x=-0.04 insta360_z=0.344 insta360_sideways=1" for the CAD 360 drone; URDFs ignore args they
+       do not declare. Mission Control passes every setting the drone declares here. -->
+  <arg name="xacro_args" default="" />
+  <arg name="xacro_mappings" value="$(eval ' '.join(a.replace('=', ':=', 1) for a in arg('xacro_args').split()))" />
+  <!-- the drone carries the ideal 360 depth sensor (omni360_ideal): Mission Control sets it from the URDF's sensors -->
+  <arg name="omni_depth" default="$(eval 'omni' in arg('drone') or 'cam_cad' in arg('drone'))" />
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="false" />
+    <arg name="world_name" value="$(find uav_simulator)/worlds/$(arg world)" />
+    <arg name="verbose" value="false" />
+    <arg name="use_sim_time" value="true" />
+    <arg name="debug" value="false" />
+    <arg name="gui" value="$(arg gui)" />
+  </include>
+
+  <param name="robot_description" command="xacro '$(find uav_simulator)/urdf/$(arg drone)' lidar_pitch_deg:=$(arg lidar_pitch_deg) $(arg xacro_mappings)" />
+  <!-- drones with the ideal 360 depth sensor (omni_depth) also publish what optic flow could range (/omni/cloud_flow) -->
+  <node if="$(arg omni_depth)" pkg="uav_simulator" type="flow_limited_cloud.py" name="flow_limited_cloud">
+    <param name="flow_range_s" value="$(arg flow_range_s)" />
+  </node>
+
+  <node pkg="topic_tools" type="throttle" name="gt_pose_throttle" args="messages /CERLAB/quadcopter/pose_raw 30 /CERLAB/quadcopter/pose" />
+  <node pkg="topic_tools" type="throttle" name="gt_vel_throttle" args="messages /CERLAB/quadcopter/vel_raw 30 /CERLAB/quadcopter/vel" />
+  <node pkg="topic_tools" type="throttle" name="gt_acc_throttle" args="messages /CERLAB/quadcopter/acc_raw 30 /CERLAB/quadcopter/acc" />
+  <node pkg="topic_tools" type="throttle" name="gt_odom_throttle" args="messages /CERLAB/quadcopter/odom_raw 30 /CERLAB/quadcopter/odom" />
+
+  <node name="spawn_gazebo_model" pkg="gazebo_ros" type="spawn_model" respawn="false"
+        args="-urdf -param robot_description -model quadcopter -x $(arg spawn_x) -y $(arg spawn_y) -z $(arg spawn_z) -Y $(arg spawn_yaw)" />
+
+  <!-- drones built from CAD (*_cad.urdf) carry their LiDAR hinge in the URDF: robot_state_publisher publishes
+       base_link -> lidar_hinge -> lidar_link for the chosen tilt, in place of setupTF's fixed 0.13 m offset -->
+  <arg name="cad_drone" value="$(eval '_cad' in arg('drone'))" />
+  <node if="$(arg cad_drone)" pkg="robot_state_publisher" type="robot_state_publisher" name="drone_state_publisher" />
+  <include file="$(find uav_simulator)/launch/setupTF.launch">
+    <arg name="pose_topic" value="/CERLAB/quadcopter/pose" />
+    <arg name="lidar_pitch_deg" value="$(arg lidar_pitch_deg)" />
+    <arg name="lidar_tf" value="$(eval not arg('cad_drone'))" />
+  </include>
+
+  <node if="$(arg keyboard)" name="keyboard_control" pkg="uav_simulator" type="keyboard_control" />
+</launch>
