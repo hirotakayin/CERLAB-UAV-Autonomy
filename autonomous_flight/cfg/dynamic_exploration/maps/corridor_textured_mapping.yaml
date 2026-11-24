@@ -3,3 +3,6 @@ ground_height: -0.3
 map_size: [86, 12, 4] # x [-43, 43], y [-6, 6]; z [-0.3, 3.7]
 local_update_range: [20, 6, 4]
 local_map_size: [86, 12, 4]
+# the drone (0.51 x 0.49 m) with a few cm to spare: the shared 1.0 m (mapping_param.yaml, for the pits' beams) closes
+# the 1.24 m lane between the first two boxes (box_4 y <= -0.71, box_2 y >= 0.53) to 0.24 m, so no trajectory fits
+robot_size: [0.6, 0.6, 0.6]

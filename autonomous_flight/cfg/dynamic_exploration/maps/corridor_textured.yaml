@@ -17,6 +17,8 @@ DEP:
   gain_region_max: [40.4, 2.4, 2.5]
   depth_bias: 0.0 # no pit to go down into
   static_environment: false # people walk through it
+  safe_distance_xy: 0.3 # roadmap nodes this far from obstacles; the shared 0.5 (for the pits) leaves only +-0.12 m
+                        # of the 1.24 m lane between the first two boxes, so the roadmap cannot get through
 
 rrt/env_box: [-2.0, 42.0, -4.0, 4.0, -0.5, 3.5]
 bspline_traj/min_height: 0.3
