@@ -1,0 +1,240 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="env_one">
+    <static>true</static>
+    
+    <link name="excavation_link">
+      
+      <inertial>
+        <mass>1.0</mass>
+        <inertia><ixx>1e-6</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-6</iyy><iyz>0</iyz><izz>1e-6</izz></inertia>
+      </inertial>
+
+      <!-- PIT BOTTOM GROUND (Z = -16.0m) -->
+      <collision name="ground_collision">
+        <pose>6.0 17.0 -16.05 0 0 0</pose>
+        <geometry><box><size>12.0 24.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="ground_visual">
+        <pose>6.0 17.0 -16.05 0 0 0</pose>
+        <geometry><box><size>12.0 24.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- TOP GROUND APRONS (Z = 0.0m PLATFORM) -->
+      <collision name="top_ground_left_collision">
+        <pose>-5.0 17.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 44.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_left_visual">
+        <pose>-5.0 17.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 44.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+
+      <collision name="top_ground_right_collision">
+        <pose>17.0 17.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 44.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_right_visual">
+        <pose>17.0 17.0 -0.05 0 0 0</pose>
+        <geometry><box><size>10.0 44.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- Near apron spans X = [-10, 22], Y = [-5, 5] (Contains Origin X=0, Y=0) -->
+      <collision name="top_ground_near_collision">
+        <pose>6.0 0.0 -0.05 0 0 0</pose>
+        <geometry><box><size>32.0 10.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_near_visual">
+        <pose>6.0 0.0 -0.05 0 0 0</pose>
+        <geometry><box><size>32.0 10.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+
+      <collision name="top_ground_far_collision">
+        <pose>6.0 34.0 -0.05 0 0 0</pose>
+        <geometry><box><size>32.0 10.0 0.1</size></box></geometry>
+      </collision>
+      <visual name="top_ground_far_visual">
+        <pose>6.0 34.0 -0.05 0 0 0</pose>
+        <geometry><box><size>32.0 10.0 0.1</size></box></geometry>
+        <material>
+          <ambient>0.4 0.4 0.4 1.0</ambient>
+          <diffuse>0.4 0.4 0.4 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- PIT SIDEWALLS (Y SHIFTED TO Y = 5m..29m) -->
+      <collision name="wall_left_collision">
+        <pose>-0.25 17.0 -8.0 0 0 0</pose>
+        <geometry><box><size>0.5 24.0 16.0</size></box></geometry>
+      </collision>
+      <visual name="wall_left_visual">
+        <pose>-0.25 17.0 -8.0 0 0 0</pose>
+        <geometry><box><size>0.5 24.0 16.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.5</ambient>
+          <diffuse>0.5 0.5 0.5 0.5</diffuse>
+        </material>
+      </visual>
+
+      <collision name="wall_right_collision">
+        <pose>12.25 17.0 -8.0 0 0 0</pose>
+        <geometry><box><size>0.5 24.0 16.0</size></box></geometry>
+      </collision>
+      <visual name="wall_right_visual">
+        <pose>12.25 17.0 -8.0 0 0 0</pose>
+        <geometry><box><size>0.5 24.0 16.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.5</ambient>
+          <diffuse>0.5 0.5 0.5 0.5</diffuse>
+        </material>
+      </visual>
+
+      <collision name="wall_far_collision">
+        <pose>6.0 29.25 -8.0 0 0 0</pose>
+        <geometry><box><size>13.0 0.5 16.0</size></box></geometry>
+      </collision>
+      <visual name="wall_far_visual">
+        <pose>6.0 29.25 -8.0 0 0 0</pose>
+        <geometry><box><size>13.0 0.5 16.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.5</ambient>
+          <diffuse>0.5 0.5 0.5 0.5</diffuse>
+        </material>
+      </visual>
+
+      <collision name="wall_near_collision">
+        <pose>6.0 4.75 -8.0 0 0 0</pose>
+        <geometry><box><size>13.0 0.5 16.0</size></box></geometry>
+      </collision>
+      <visual name="wall_near_visual">
+        <pose>6.0 4.75 -8.0 0 0 0</pose>
+        <geometry><box><size>13.0 0.5 16.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.5 0.5 0.5 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- VERTICAL COLUMNS -->
+      <collision name="col_1_collision"><pose>6.0 11.0 -8.0 0 0 0</pose><geometry><box><size>0.3 0.3 16.0</size></box></geometry></collision>
+      <visual name="col_1_visual">
+        <pose>6.0 11.0 -8.0 0 0 0</pose><geometry><box><size>0.3 0.3 16.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+
+      <collision name="col_2_collision"><pose>6.0 17.0 -8.0 0 0 0</pose><geometry><box><size>0.3 0.3 16.0</size></box></geometry></collision>
+      <visual name="col_2_visual">
+        <pose>6.0 17.0 -8.0 0 0 0</pose><geometry><box><size>0.3 0.3 16.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+      
+      <collision name="col_3_collision"><pose>6.0 23.0 -8.0 0 0 0</pose><geometry><box><size>0.3 0.3 16.0</size></box></geometry></collision>
+      <visual name="col_3_visual">
+        <pose>6.0 23.0 -8.0 0 0 0</pose><geometry><box><size>0.3 0.3 16.0</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- HORIZONTAL H-BEAMS -->
+      <collision name="hbeam_y11_d4_collision"><pose>6.0 11.0 -4.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y11_d4_visual">
+        <pose>6.0 11.0 -4.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="hbeam_y11_d8_collision"><pose>6.0 11.0 -8.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y11_d8_visual">
+        <pose>6.0 11.0 -8.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="hbeam_y11_d12_collision"><pose>6.0 11.0 -12.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y11_d12_visual">
+        <pose>6.0 11.0 -12.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+
+      <collision name="hbeam_y17_d4_collision"><pose>6.0 17.0 -4.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y17_d4_visual">
+        <pose>6.0 17.0 -4.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="hbeam_y17_d8_collision"><pose>6.0 17.0 -8.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y17_d8_visual">
+        <pose>6.0 17.0 -8.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="hbeam_y17_d12_collision"><pose>6.0 17.0 -12.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y17_d12_visual">
+        <pose>6.0 17.0 -12.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+
+      <collision name="hbeam_y23_d4_collision"><pose>6.0 23.0 -4.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y23_d4_visual">
+        <pose>6.0 23.0 -4.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="hbeam_y23_d8_collision"><pose>6.0 23.0 -8.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y23_d8_visual">
+        <pose>6.0 23.0 -8.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="hbeam_y23_d12_collision"><pose>6.0 23.0 -12.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry></collision>
+      <visual name="hbeam_y23_d12_visual">
+        <pose>6.0 23.0 -12.0 0 0 0</pose><geometry><box><size>12.0 0.3 0.3</size></box></geometry>
+        <material>
+          <ambient>0.5 0.0 0.0 1.0</ambient>
+          <diffuse>0.5 0.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+
+    </link>
+  </model>
+</sdf>
