@@ -87,6 +87,7 @@ namespace mapManager{
 		// RAYCASTING
 		double inspectRange_ = 0.0; // m, longer rays still map obstacles but do not count as inspecting
 		double raycastMaxLength_;
+		bool raycastEarlyStop_ = true; // stop a ray at the first voxel an earlier ray of the same scan walked (faster, fills in slower)
 		double pHitLog_, pMissLog_, pMinLog_, pMaxLog_, pOccLog_; 
 
 		// MAP

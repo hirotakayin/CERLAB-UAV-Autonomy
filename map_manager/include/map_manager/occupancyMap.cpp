@@ -201,6 +201,8 @@ namespace mapManager{
 		else{
 			cout << this->hint_ << ": Raycast max length: " << this->raycastMaxLength_ << endl;
 		}
+		this->nh_.param<bool>(this->ns_ + "/raycast_early_stop", this->raycastEarlyStop_, true);
+		cout << this->hint_ << ": Raycast early stop: " << (this->raycastEarlyStop_ ? "on" : "off") << endl;
 
 		// p hit
 		double pHit;
@@ -877,14 +879,23 @@ namespace mapManager{
 
 
 			// raycasting for update occupancy
-			this->raycaster_.setInput(currPoint/this->mapRes_, this->position_/this->mapRes_);
+			// walk on the map's own grid (cells counted from mapSizeMin_), so each cell is exactly one map voxel. Walking on
+			// a grid from world 0 shifts the cells off the voxels when ground_height is not a multiple of the resolution;
+			// at exactly half a voxel off (e.g. -10.5 at 0.2 m) the cell centres sit on voxel faces and rounding sends
+			// pairs of cells to one voxel, so whole voxel layers were never marked free and rays stopped on themselves
+			this->raycaster_.setInput((currPoint - this->mapSizeMin_)/this->mapRes_, (this->position_ - this->mapSizeMin_)/this->mapRes_);
 			Eigen::Vector3d rayPoint, actualPoint;
 			while (this->raycaster_.step(rayPoint)){
 				actualPoint = rayPoint;
 				actualPoint(0) += 0.5;
 				actualPoint(1) += 0.5;
 				actualPoint(2) += 0.5;
-				actualPoint *= this->mapRes_;
+				actualPoint = actualPoint * this->mapRes_ + this->mapSizeMin_;
+				// without the early stop, each voxel takes one free count per scan from the walks: a wall voxel that many
+				// rays graze would otherwise collect more misses than hits and be cleared
+				if (not this->raycastEarlyStop_ and this->flagTraverse_[this->posToAddress(actualPoint)] == this->raycastNum_){
+					continue;
+				}
 				raycastVoxelID = this->updateOccupancyInfo(actualPoint, false);
 				if (this->inspectRange_ > 0.0 and (actualPoint - this->position_).norm() <= this->inspectRange_){
 					this->inspected_[raycastVoxelID] &= ~4; // a close ray went straight through: the far hit was wrong
@@ -892,7 +903,7 @@ namespace mapManager{
 
 				// raycastVoxelID = this->posToAddress(actualPoint);
 				if (this->flagTraverse_[raycastVoxelID] == this->raycastNum_){
-					break;
+					break; // early stop: an earlier ray of this scan walked on from here
 				}
 				else{
 					this->flagTraverse_[raycastVoxelID] = this->raycastNum_;
