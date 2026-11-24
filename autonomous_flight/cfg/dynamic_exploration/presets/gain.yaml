@@ -1,0 +1,3 @@
+# Modified gain with greedy goals: unexplored blocks.
+DEP:
+  tour_enabled: false

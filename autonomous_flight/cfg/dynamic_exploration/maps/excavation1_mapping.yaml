@@ -1,0 +1,2 @@
+# excavation1 uses the map size in mapping_param.yaml. Loaded into /dynamic_map (DEP) and /occupancy_map (EPIC's scoring node)
+ground_height: -16.5

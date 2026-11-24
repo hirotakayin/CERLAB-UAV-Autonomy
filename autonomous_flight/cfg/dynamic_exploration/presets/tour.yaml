@@ -1,0 +1,3 @@
+# Tour through the areas holding unexplored blocks.
+DEP:
+  tour_enabled: true

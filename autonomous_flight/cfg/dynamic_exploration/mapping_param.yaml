@@ -1,0 +1,56 @@
+sensor_input_mode: 1 # 0 camera 1: lidar
+localization_mode: 1 # 0: pose (default) 1: odom
+depth_image_topic: /camera/depth/image_raw
+# depth_image_topic: /no_topic
+point_cloud_topic: /cloud_registered_body # Mid-360 (uav_simulator lidar-dev), points in the tilted lidar frame
+pose_topic: /CERLAB/quadcopter/pose
+odom_topic: /CERLAB/quadcopter/odom
+
+# robot size
+robot_size: [1.0, 1.0, 1.0] # keeps the centre about 0.6 m from beams; the drone itself is 0.51 x 0.49 x 0.15 m
+
+# Camera Parameters
+depth_intrinsics: [554.254691191187, 554.254691191187, 320.5, 240.5] # fx,  fy, cx, cy
+depth_scale_factor: 10 # 1000 for Intel Realsense Camera
+depth_min_value: 0.5
+depth_max_value: 5.0
+depth_filter_margin: 2 # filter
+depth_skip_pixel: 2 # filter
+image_cols: 640
+image_rows: 480
+# depth camera extrinsic (sensor_input_mode: 0)
+# body_to_camera: [0.0,  0.0,  1.0,  0.09,
+#                 -1.0,  0.0,  0.0,  0.0 ,
+#                  0.0, -1.0,  0.0,  0.095,
+#                  0.0,  0.0,  0.0,  1.0]
+# lidar extrinsic (sensor_input_mode: 1): Mid-360 pitched 23.5 deg nose-down, 0.13 m above base_link
+body_to_camera: [ 0.917060, 0.0, 0.398749, 0.0,
+                  0.0,      1.0, 0.0,      0.0,
+                 -0.398749, 0.0, 0.917060, 0.13,
+                  0.0,      0.0, 0.0,      1.0]
+
+# Raycasting
+raycast_max_length: 20.0
+inspect_range: 10.0 # m, a surface only counts as inspected from this close; open air clears from any range and longer rays still map obstacles. 0 = off
+p_hit: 0.70
+p_miss: 0.35
+p_min: 0.12
+p_max: 0.97
+p_occ: 0.80
+
+# Map
+map_resolution: 0.2
+ground_height: -16.5 # m, bottom of the map: just below the excavation1 pit floor (-16 m)
+map_size: [46, 80, 21] # x, y centred on the origin: x [-23, 23], y [-40, 40]; z [ground_height, ground_height + 21] = [-16.5, 4.5]
+local_update_range: [20, 20, 21] # map everything the lidar returns within raycast_max_length; a small box clips scans to a rectangle
+local_bound_inflation: 2.0 # inflate local bound in meter
+clean_local_map: false
+
+# visualization
+local_map_size: [50, 40, 20] # UPDATED: Matches map_size for full workspace rendering
+max_height_visualization: 3.0 # m (adjusted for Z=0 platform and max flight ceiling)
+visualize_global_map: true
+verbose: false
+
+prebuilt_map_directory: "No"
+# prebuilt_map_directory: "/home/cerlab/map/static_map.pcd"
