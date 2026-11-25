@@ -85,3 +85,21 @@ grid that ignores the map origin (half a voxel off in z when ground_height is no
 in every pit config) and stops each ray at the first voxel an earlier ray crossed. `check_occmap_raycast.py`
 reproduces the monitor's number with a line-by-line port and switches each quirk off. Floor % and surface % depend
 on hits, not on cleared space, and match the monitor.
+
+## Training worlds and evaluation courses
+
+Generated sets are not kept in git: they come back exactly from the scripts below and a seed.
+
+- `scripts/make_ari3d.py` (module `ari3d.py`): 3D training worlds from ARiADNE's map PNGs
+  (`~/rl/large-scale-DRL-exploration/maps`). Each region gets a level (floor and ceiling move together), some are
+  pits, islands may be low or have lips, and hurdle/lintel gates close any single flight height that reaches too
+  much. Every opening is at least `passage` (3.2 m) and reachable with 0.5 m clearance. `accepted` in stats.json
+  marks worlds that pass both tests. Needs scipy and scikit-image (`~/.venvs/ariadne/bin/python`).
+  `make_ari3d.py --count 8 --seed 0 --out <dir>`; `--flat` gives the plain 2D map extruded.
+- `scripts/make_courses.py` (module `course.py`): evaluation courses, closed rooms with obstacles at every height
+  (`--layout room`, test seeds 0-99). `--layout maze` is an earlier training layout, kept for reference.
+- `scripts/view_check.py`: how much surface the best 1-2 viewpoints see (line of sight in the lidar's band).
+- `scripts/slice_check.py`: per-column height options ("slices") on the excavation worlds: node counts,
+  connectivity and surfaces seen.
+- `scripts/prune_study.py`: compares node-pruning strategies (full lattice, slices, utility gating, one height per
+  column) with a greedy explorer on `make_ari3d` worlds.

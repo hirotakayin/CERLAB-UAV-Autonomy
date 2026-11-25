@@ -1,0 +1,510 @@
+"""3D training worlds from ARiADNE's 2D map PNGs: one map's topology, heights varied per region.
+
+ARiADNE trains on 5,663 floor-plan PNGs (marmotlab/large-scale-DRL-exploration, maps/): 640 x 480 px at 0.4 m,
+127 solid, 194 free, a 16 x 16 px block of 208 at the start. This module turns one map into a voxel world:
+
+  1. free space -> regions: watershed of the distance to the walls, seeds at least region_size apart, so a
+     region is a room or a piece of corridor
+  2. each region gets a level, shifting its floor and ceiling together (a terrace), and its own clear height;
+     a link between regions keeps the level or steps it up or down; some regions are pits (the floor drops,
+     the ceiling stays)
+  3. each solid island (not the outer boundary) is either full height, low enough to fly over, or full height
+     with an overhanging lip that roofs the free space next to it (hiding the floor under it from above)
+  4. solve: linked regions must share `passage` of height (the lower ceiling is lifted); while part of the
+     free configuration space is cut off from the start, the region there is opened up to span its neighbours;
+     then, while one constant flight height still reaches more than max_flat_reach of the footprint in one
+     piece, a gate closes that height on a narrow link it passes through: a hurdle (open only at the top of
+     the band the two regions share) or a lintel (open only at the bottom)
+
+Clearance: every opening the drone has to use (between levels, under gates and lips, over low islands) is at
+least `passage` tall in whole voxels (3.2 m by default), and the solver checks reachability with the drone's box
+grown by `margin` (0.5 m) on every side. A world is `accepted` when no single height reaches more than
+max_flat_reach of it and the grown box still reaches min_margin_reach of it.
+
+Everything stays a height field per (x, y) column: free between floor(x, y) and ceiling(x, y), with island columns
+free only above the island top. With all variation off (make_ari3d --flat), the result is the 2D map extruded, which gives a
+check that a 3D trainer reproduces ARiADNE on its own maps.
+
+The voxel z = 0 is the deepest floor; the start region's level is at `base`. No SDF export yet (the walls are not boxes).
+"""
+
+from dataclasses import asdict, dataclass
+import json
+import math
+from pathlib import Path
+
+import numpy as np
+
+FREE, SOLID, START = 194, 127, 208
+
+
+@dataclass
+class Ari3DParams:
+    pixel: float = 0.2                  # m per PNG pixel (ARiADNE: 0.4; 0.2 = half scale, maps of ~45-110 m)
+    resolution: float = 0.4             # m, voxel size
+    region_size: float = 10.0           # m, least distance between region seeds
+    # levels: a region's floor and ceiling move together (a terrace), so no one flight height is open everywhere
+    level_change: float = 0.7           # share of region links where the level changes
+    level_step: tuple = (2.0, 4.0)      # m, size of a level change (up or down, cut to what passage allows)
+    level_keep: float = 0.75            # chance a change keeps the direction of the change before it (drift)
+    level_range: tuple = (-8.0, 8.0)    # m, levels stay in this range around the start region's level
+    clear: tuple = (4.8, 7.2)           # m, a region's floor-to-ceiling height (leaves room for level steps above passage)
+    sunken: tuple = (0.15, 3.0, 6.0)    # (share of regions, shallowest, deepest extra drop of the floor in m): pits
+    low_island: tuple = (0.35, 1.5)     # (share of islands, least height above the floors around it in m)
+    overhang: tuple = (0.25, 1.6, 4.0)  # (share of full islands, shortest, longest reach of the lip in m)
+    # clearance: every opening the drone must use is at least `passage` tall (rounded up to whole voxels), and the
+    # solver checks reachability with the drone's box grown by `margin` on every side, so nothing is a squeeze
+    passage: float = 3.0                # m, least height of any opening: between levels, under gates and lips, over islands
+    margin: float = 0.5                 # m, clearance around the drone's box that every route must allow
+    min_margin_reach: float = 0.99      # share of the footprint reachable with the grown box, for `accepted`
+    # height gates on narrow links, added until no single flight height reaches more than max_flat_reach
+    gate_width: float = 14.0            # m, links at most this wide can get a gate
+    gate_thick: tuple = (0.8, 1.6)      # m, the gate's thickness along the passage
+    max_flat_reach: float = 0.6         # share of the footprint one constant height may reach in one piece
+    max_gates: int = 16
+    tries: int = 10                     # height draws per map; the one with the lowest single-height reach is kept
+    min_region_m2: float = 25.0         # m2, smaller regions join the neighbour they share most border with
+    min_island_m2: float = 4.0          # m2, smaller solid blobs (edge noise) stay full height
+    robot_size: float = 1.0             # m, the drone's safety box
+    start_clearance: float = 0.6        # m above the start region's floor
+
+
+def load_png(path):
+    """(free, start_px) from an ARiADNE map PNG: free [row, col] bool, start (row, col) at the 208 block's centre."""
+    from skimage import io
+    img = (io.imread(str(path), as_gray=True) * 255).astype(int)
+    free = (img > 150) | ((img <= 80) & (img >= 50))
+    rr, cc = np.nonzero(img == START)
+    return free, (float(rr.mean()), float(cc.mean()))
+
+
+class Ari3D:
+    """A voxel world built from one PNG. Grids are [z, y, x]; y grows with the PNG's row index."""
+
+    def __init__(self, png, seed=0, params=None):
+        p = params or Ari3DParams()
+        best = None
+        for trial in range(max(1, p.tries)):
+            self._generate(png, seed, p, np.random.default_rng([seed, trial]))
+            self.info['trial'] = trial
+            if best is None or (self.margin_reach >= p.min_margin_reach, -self.flat_reach) > \
+                    (best['margin_reach'] >= p.min_margin_reach, -best['flat_reach']):
+                best = dict(self.__dict__)
+            if self.flat_reach <= p.max_flat_reach and self.margin_reach >= p.min_margin_reach:
+                break
+        self.__dict__.update(best)
+        self.info['accepted'] = bool(self.flat_reach <= p.max_flat_reach and
+                                     self.margin_reach >= p.min_margin_reach)   # training should skip the rest
+
+    def _generate(self, png, seed, p, rng):
+        from scipy import ndimage
+        self.params = p
+        self.png, self.seed = str(png), seed
+        free_px, start_px = load_png(png)
+
+        # 2D free grid at the voxel size (a cell is free if most of its pixels are), cropped around the free space
+        k = p.resolution / p.pixel
+        if abs(k - round(k)) > 1e-6 or round(k) < 1:
+            raise ValueError('resolution must be a whole multiple of pixel')
+        k = int(round(k))
+        h, w = (free_px.shape[0] // k) * k, (free_px.shape[1] // k) * k
+        free = free_px[:h, :w].reshape(h // k, k, w // k, k).mean(axis=(1, 3)) > 0.5
+        rows, cols = np.nonzero(free)
+        r0, r1 = max(0, rows.min() - 2), min(free.shape[0], rows.max() + 3)
+        c0, c1 = max(0, cols.min() - 2), min(free.shape[1], cols.max() + 3)
+        free = free[r0:r1, c0:c1]
+        start_rc = (int(start_px[0] // k) - r0, int(start_px[1] // k) - c0)
+        free = _largest_containing(free, start_rc, ndimage)
+        self.free2d = free
+        res = p.resolution
+
+        # 1. regions
+        dist = ndimage.distance_transform_edt(free)
+        size = max(3, int(round(p.region_size / res)) | 1)
+        peaks = free & (dist == ndimage.maximum_filter(dist, size=size)) & (dist >= 1.5)
+        markers, n_regions = ndimage.label(peaks)
+        from skimage.segmentation import watershed
+        regions = watershed(-dist, markers, mask=free).astype(np.int32)
+        regions = _merge_small(regions, p.min_region_m2 / (res * res))
+        ids = [int(i) for i in np.unique(regions) if i > 0]
+        self.regions = regions
+
+        # 2. levels: walk the region graph from the start region; each link keeps or changes the level
+        pairs = _touching_pairs(regions)
+        adj = {i: set() for i in ids}
+        for a_, b_ in pairs:
+            adj[a_].add(b_)
+            adj[b_].add(a_)
+        snap = lambda v: round(v / res) * res
+        gap = math.ceil(p.passage / res - 1e-9) * res        # the passage in whole voxels
+        self.gap = gap
+        clear = {i: snap(rng.uniform(*p.clear)) for i in ids}
+        level = {}
+        first = int(regions[start_rc]) if regions[start_rc] > 0 else ids[0]
+        level[first], queue = 0.0, [first]
+        heading = {first: 1.0 if rng.random() < 0.5 else -1.0}
+        while queue:
+            q = queue.pop(int(rng.integers(len(queue))))      # random order, so levels do not just follow BFS rings
+            for c in sorted(adj[q]):
+                if c in level:
+                    continue
+                d = 0.0
+                heading[c] = heading[q] if rng.random() < p.level_keep else -heading[q]
+                if rng.random() < p.level_change:
+                    room = min(clear[q], clear[c]) - gap
+                    d = heading[c] * snap(min(rng.uniform(*p.level_step), room))
+                    if not p.level_range[0] <= level[q] + d <= p.level_range[1]:
+                        d, heading[c] = -d, -heading[c]          # bounce off the range
+                level[c] = float(np.clip(level[q] + d, *p.level_range))
+                queue.append(c)
+        for i in ids:                                    # regions not linked to the start one (should not happen)
+            level.setdefault(i, 0.0)
+        floor = {i: level[i] for i in ids}
+        ceil = {i: level[i] + clear[i] for i in ids}
+        kind = {i: 'level' for i in ids}
+        for i in ids:
+            if rng.random() < p.sunken[0]:
+                kind[i] = 'sunken'
+                floor[i] -= snap(rng.uniform(*p.sunken[1:]))
+
+        # 3. islands: low (fly over), full, or full with an overhanging lip
+        solid_lab, n_solid = ndimage.label(~free)
+        border = set(np.unique(np.concatenate([solid_lab[0], solid_lab[-1], solid_lab[:, 0], solid_lab[:, -1]]))) - {0}
+        islands = {}
+        for j in range(1, n_solid + 1):
+            if j in border:
+                continue
+            mask = solid_lab == j
+            if mask.sum() * res * res < p.min_island_m2:
+                continue
+            ring = ndimage.binary_dilation(mask, iterations=1) & free
+            around = [i for i in np.unique(regions[ring]) if i > 0]
+            if not around:
+                continue
+            u = rng.random()
+            if u < p.low_island[0]:
+                islands[j] = dict(kind='low', around=around, frac=rng.uniform(0.2, 0.8))
+            elif u < p.low_island[0] + (1 - p.low_island[0]) * p.overhang[0]:
+                islands[j] = dict(kind='lip', around=around, reach=rng.uniform(*p.overhang[1:]), frac=rng.uniform(0.2, 0.8))
+            else:
+                islands[j] = dict(kind='full', around=around)
+
+        # 4. solve: shared height between touching regions; reachability (flatten as the fallback); then height
+        #    gates until no single flight height reaches more than max_flat_reach of the footprint
+        bounds = {}
+        for a_, b_ in pairs:
+            m = _boundary(regions, a_, b_)
+            if m.sum() * res / 2 <= p.gate_width:
+                bounds[(a_, b_)] = m
+        gates, self.flattened = [], []
+        flat = None
+        for attempt in range(len(ids) + p.max_gates + 2):
+            for _ in range(4):
+                for a_, b_ in pairs:
+                    need = max(floor[a_], floor[b_]) + gap
+                    for i in (a_, b_):
+                        if ceil[i] < need:
+                            ceil[i] = need
+            occ, fmap, cmap, base = self._build(free, regions, solid_lab, islands, floor, ceil, gates)
+            start = self._start_point(start_rc, fmap, base)
+            cfree = _cspace(occ, p.robot_size, res, ndimage)
+            si = tuple(np.floor(start / res).astype(int)[::-1])
+            if not cfree[si]:
+                raise RuntimeError('start not in free configuration space')
+            lab, _ = ndimage.label(cfree)
+            reach = lab == lab[si]
+            # the same with the box grown by margin: columns the drone reaches only by squeezing count as cut
+            big = _cspace(occ, p.robot_size + 2 * p.margin, res, ndimage)
+            col = np.nonzero(big[:, si[1], si[2]])[0]
+            foot = reach.any(0)
+            if len(col):
+                lab_b, _ = ndimage.label(big)
+                reach_b = (lab_b == lab_b[col[np.argmin(np.abs(col - si[0]))], si[1], si[2]]).any(0)
+                # the grown box keeps `margin` further from walls: widen its footprint back by that much, so only
+                # space behind a narrow opening counts as squeezed, not the strip along every wall
+                w = int(math.ceil(p.margin / res))
+                reach_b = ndimage.binary_dilation(reach_b, structure=np.ones((2 * w + 1, 2 * w + 1), bool))
+            else:
+                reach_b = np.zeros_like(foot)
+            self.margin_reach = float((foot & reach_b).sum() / max(1, foot.sum()))
+            squeezed = foot & ~reach_b
+            cut = (cfree & ~reach) | (squeezed[None] & cfree)
+            if (cfree & ~reach).sum() > 0.01 * cfree.sum() or squeezed.sum() > (1 - p.min_margin_reach) * foot.sum():
+                if gates and gates[-1].get('fresh'):          # the last gate cut the map: drop it
+                    gates.pop()
+                    self.flattened.append(('gate', None))
+                    continue
+                zz, yy, xx = np.nonzero(cut)
+                counts = np.bincount(regions[yy, xx], minlength=regions.max() + 1)
+                counts[0] = 0
+                worst = int(counts.argmax())
+                if counts[worst] == 0:   # cut-off space only above islands: make the worst island full height
+                    isl = np.bincount(solid_lab[yy, xx], minlength=n_solid + 1)
+                    isl[0] = 0
+                    islands[int(isl.argmax())]['kind'] = 'full'
+                    self.flattened.append(('island', int(isl.argmax())))
+                else:                    # open the region up to span its neighbours
+                    floor[worst] = min(floor[n] for n in adj[worst]) if adj[worst] else floor[worst]
+                    ceil[worst] = max(ceil[n] for n in adj[worst]) if adj[worst] else ceil[worst]
+                    kind[worst] = 'level'
+                    self.flattened.append(('region', worst))
+                continue
+            for g in gates:
+                g.pop('fresh', None)
+            flat, k, layer_lab = _flat_reach(cfree & reach)
+            if flat <= p.max_flat_reach or len(gates) >= p.max_gates:
+                break
+            # close the dominant height on a narrow link it passes through
+            zk = (k + 0.5) * res
+            comp = layer_lab == np.bincount(layer_lab.ravel())[1:].argmax() + 1
+            options = []
+            for (a_, b_), m in bounds.items():
+                if any(g['pair'] == (a_, b_) for g in gates) or not (m & comp).any():
+                    continue
+                lo, hi = max(floor[a_], floor[b_]) + base, min(ceil[a_], ceil[b_]) + base
+                if hi - lo < gap + 2 * res:
+                    continue
+                if zk < hi - gap - 0.2:
+                    options.append(((a_, b_), 'hurdle'))      # passage only at the top of the shared band
+                elif zk > lo + gap + 0.2:
+                    options.append(((a_, b_), 'lintel'))      # passage only at the bottom
+            if not options:
+                break
+            pair, gk = options[int(rng.integers(len(options)))]
+            t = max(1, int(round(rng.uniform(*p.gate_thick) / res / 2)))
+            strip = ndimage.binary_dilation(bounds[pair], iterations=t) & ((regions == pair[0]) | (regions == pair[1]))
+            gates.append(dict(pair=pair, kind=gk, strip=strip, fresh=True))
+        else:                                   # out of attempts with part of the map still cut or squeezed
+            pass
+        if 'flat' not in locals() or flat is None:
+            flat, k, _ = _flat_reach(cfree & reach)
+        self.flat_reach, self.flat_height = flat, (k + 0.5) * res
+        self.gates = gates
+        top = max(ceil.values())
+        self.occupied, self.floor_map, self.ceil_map, self.base, self.top = occ, fmap, cmap, base, top
+        self.start = start
+        self.explorable = _largest_free_from(~occ, si, ndimage)
+        self.surface = occ & _dilate6(self.explorable)
+        self.origin = np.zeros(3)
+        self.kind = kind
+        self.islands = islands
+        self.info = dict(png=Path(self.png).name, seed=seed, size_m=[round(free.shape[1] * res, 1), round(free.shape[0] * res, 1),
+                                                                      round(occ.shape[0] * res, 1)],
+                         start_level_z_m=round(base, 2), regions=len(ids),
+                         levels=len({round(floor[i], 1) for i in ids if kind[i] == 'level'}),
+                         level_span_m=round(max(level.values()) - min(level.values()), 1),
+                         sunken=sum(v == 'sunken' for v in kind.values()), islands=len(islands),
+                         low_islands=sum(v['kind'] == 'low' for v in islands.values()),
+                         lips=sum(v['kind'] == 'lip' for v in islands.values()),
+                         gates=len(gates), hurdles=sum(g['kind'] == 'hurdle' for g in gates),
+                         lintels=sum(g['kind'] == 'lintel' for g in gates),
+                         flat_reach=round(float(self.flat_reach), 3), flat_height_m=round(float(self.flat_height), 1),
+                         passage_m=round(self.gap, 2), margin_reach=round(self.margin_reach, 3),
+                         flattened=len(self.flattened),
+                         explorable_m3=round(float(self.explorable.sum() * res ** 3), 1),
+                         reachable_share=round(float(reach.sum() / cfree.sum()), 4))
+
+    # ---------------------------------------------------------------------------------------------------------
+    def _build(self, free, regions, solid_lab, islands, floor, ceil, gates):
+        """Occupancy [z, y, x], the floor and ceiling maps (m, absolute, NaN on full solid), and the start level's z."""
+        from scipy import ndimage
+        p, res = self.params, self.params.resolution
+        base = -min(min(floor.values()), 0.0)
+        top = max(ceil.values())
+        ny, nx = free.shape
+        fmap = np.full((ny, nx), np.nan)
+        cmap = np.full((ny, nx), np.nan)
+        for i in floor:
+            m = regions == i
+            fmap[m], cmap[m] = floor[i] + base, ceil[i] + base
+        for j, isl in islands.items():
+            mask = solid_lab == j
+            fl = max(floor[i] for i in isl['around']) + base
+            cl = min(ceil[i] for i in isl['around']) + base
+            if isl['kind'] == 'low':
+                hi = cl - self.gap
+                lo = fl + p.low_island[1]
+                if hi > lo:
+                    fmap[mask] = math.floor((lo + isl['frac'] * (hi - lo)) / res) * res   # down: never less than the gap
+                    cmap[mask] = cl
+            elif isl['kind'] == 'lip':
+                reach = max(1, int(round(isl['reach'] / res)))
+                lip = ndimage.binary_dilation(mask, iterations=reach) & free
+                lo, hi = fl + self.gap, cl - 1.0
+                if hi > lo:
+                    z = math.ceil((lo + isl['frac'] * (hi - lo)) / res) * res              # up: never less than the gap
+                    cmap[lip] = np.minimum(cmap[lip], z)
+                    fl_lip = fmap[lip]
+                    bad = cmap[lip] - fl_lip < self.gap       # a lip over a raised floor: keep the region's own ceiling
+                    if bad.any():
+                        sub = cmap[lip]
+                        sub[bad] = np.nan
+                        cmap[lip] = np.where(np.isnan(sub), np.array([ceil[r] + base for r in regions[lip]]), sub)
+        for g in gates:
+            a_, b_ = g['pair']
+            lo, hi = max(floor[a_], floor[b_]) + base, min(ceil[a_], ceil[b_]) + base
+            m = g['strip']
+            if g['kind'] == 'hurdle':
+                fmap[m] = np.maximum(fmap[m], hi - self.gap)
+            else:
+                cmap[m] = np.minimum(cmap[m], lo + self.gap)
+        nz = int(math.ceil((top + base) / res)) + 1
+        zc = (np.arange(nz) + 0.5) * res
+        f = np.where(np.isnan(fmap), np.inf, fmap)
+        c = np.where(np.isnan(cmap), -np.inf, cmap)
+        free3 = (zc[:, None, None] > f[None]) & (zc[:, None, None] < c[None])
+        return ~free3, fmap, cmap, base
+
+    def _start_point(self, rc, fmap, base):
+        res = self.params.resolution
+        f = fmap[rc]
+        if np.isnan(f):
+            f = base
+        z = f + self.params.start_clearance
+        z = (math.floor(z / res) + 0.5) * res
+        return np.array([(rc[1] + 0.5) * res, (rc[0] + 0.5) * res, z])
+
+    # ---------------------------------------------------------------------------------------------------------
+    def save(self, folder):
+        folder = Path(folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(folder / 'world.npz', occupied=self.occupied, explorable=self.explorable, surface=self.surface,
+                            start=self.start, origin=self.origin, resolution=self.params.resolution,
+                            floor_map=self.floor_map, ceiling_map=self.ceil_map, regions=self.regions, base=self.base)
+        (folder / 'stats.json').write_text(json.dumps(dict(self.info, params={k: (list(v) if isinstance(v, tuple) else v)
+                                                                             for k, v in asdict(self.params).items()}), indent=1))
+
+    def preview(self, path):
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        res, base = self.params.resolution, self.base
+        ny, nx = self.free2d.shape
+        ext = (0, nx * res, 0, ny * res)
+        fig, axs = plt.subplots(1, 4, figsize=(20, 5.2), gridspec_kw=dict(width_ratios=[1, 1, 1, 1.15]))
+        rng = np.random.default_rng(1)
+        lut = rng.uniform(0.35, 0.95, (self.regions.max() + 1, 3))
+        lut[0] = 0.25
+        panels = [('regions (watershed)', lut[self.regions], None, None),
+                  ('floor, m from the start level (islands: their top)', self.floor_map - base, 'RdBu_r', (-9, 9)),
+                  ('ceiling, m from the start level', self.ceil_map - base, 'viridis', (-3, self.top))]
+        for ax, (title, data, cmap, lim) in zip(axs, panels):
+            if cmap is None:
+                ax.imshow(data, origin='lower', extent=ext, interpolation='nearest')
+            else:
+                ax.set_facecolor('#3b3f47')
+                im = ax.imshow(np.ma.masked_invalid(data), origin='lower', extent=ext, cmap=cmap, vmin=lim[0], vmax=lim[1],
+                               interpolation='nearest')
+                cax = make_axes_locatable(ax).append_axes('right', size='3%', pad=0.05)
+                fig.colorbar(im, cax=cax).ax.tick_params(labelsize=7)
+            for g in self.gates:
+                ys, xs = np.nonzero(g['strip'])
+                ax.scatter((xs + 0.5) * res, (ys + 0.5) * res, s=2, marker='s', linewidths=0,
+                           color='#ff8c00' if g['kind'] == 'hurdle' else '#00c8ff')
+            ax.plot(self.start[0], self.start[1], marker='*', ms=15, color='#e0218a', mec='white', mew=0.8)
+            ax.set_title(title, fontsize=10)
+            ax.tick_params(labelsize=8)
+        # a side cut through the start
+        ax = axs[3]
+        row = int(self.start[1] // res)
+        cut = self.occupied[:, row, :]
+        ax.imshow(np.where(cut, 0.25, 0.97), origin='lower', cmap='gray', vmin=0, vmax=1,
+                  extent=(0, nx * res, 0, cut.shape[0] * res), interpolation='nearest', aspect='auto')
+        ax.plot(self.start[0], self.start[2], marker='*', ms=15, color='#e0218a', mec='white', mew=0.8)
+        ax.set_title('side cut through the start (y = %.1f m)' % self.start[1], fontsize=10)
+        ax.tick_params(labelsize=8)
+        i = self.info
+        fig.suptitle('%s (seed %d): %.0f x %.0f m, %.1f m tall; %d regions on %d levels (span %.1f m), %d pits; %d islands '
+                     '(%d low, %d lips); gates: %d hurdles (orange), %d lintels (cyan); best single height reaches %.0f%%'
+                     % (i['png'], self.seed, *i['size_m'], i['regions'], i['levels'], i['level_span_m'], i['sunken'],
+                        i['islands'], i['low_islands'], i['lips'], i['hurdles'], i['lintels'], 100 * i['flat_reach']),
+                     fontsize=10.5)
+        fig.tight_layout(rect=(0, 0, 1, 0.93))
+        fig.savefig(path, dpi=80)
+        plt.close(fig)
+
+
+# ---- helpers -------------------------------------------------------------------------------------------------
+
+def _largest_containing(free, rc, ndimage):
+    lab, _ = ndimage.label(free)
+    if lab[rc] == 0:
+        raise ValueError('start is not in free space')
+    return lab == lab[rc]
+
+
+def _merge_small(regions, min_cells):
+    """Join regions under min_cells to the neighbour they touch most (repeated until none is left)."""
+    while True:
+        ids, counts = np.unique(regions[regions > 0], return_counts=True)
+        small = ids[counts < min_cells]
+        if len(small) == 0 or len(ids) <= 1:
+            return regions
+        i = small[np.argmin(counts[counts < min_cells])]
+        m = regions == i
+        ring = np.zeros_like(m)
+        ring[1:] |= m[:-1]; ring[:-1] |= m[1:]; ring[:, 1:] |= m[:, :-1]; ring[:, :-1] |= m[:, 1:]
+        nb = regions[ring & ~m]
+        nb = nb[nb > 0]
+        if len(nb) == 0:
+            regions[m] = 0 if len(ids) > 1 else i
+            continue
+        regions[m] = np.bincount(nb).argmax()
+
+
+def _boundary(regions, a, b):
+    """Cells of region a next to region b and of b next to a (4-neighbour)."""
+    ma, mb = regions == a, regions == b
+    def grow(m):
+        g = m.copy()
+        g[1:] |= m[:-1]; g[:-1] |= m[1:]; g[:, 1:] |= m[:, :-1]; g[:, :-1] |= m[:, 1:]
+        return g
+    return (ma & grow(mb)) | (mb & grow(ma))
+
+
+def _flat_reach(cfree):
+    """Largest share of the footprint (columns with any free configuration) one constant height reaches in one
+    4-connected piece: (share, layer index, that layer's labels)."""
+    from scipy import ndimage
+    foot = cfree.any(0).sum()
+    best = (0.0, 0, None)
+    for k in range(cfree.shape[0]):
+        if not cfree[k].any():
+            continue
+        lab, _ = ndimage.label(cfree[k])
+        share = np.bincount(lab.ravel())[1:].max() / max(foot, 1)
+        if share > best[0]:
+            best = (float(share), k, lab)
+    return best
+
+
+def _touching_pairs(regions):
+    pairs = set()
+    for a, b in ((regions[:, :-1], regions[:, 1:]), (regions[:-1, :], regions[1:, :])):
+        m = (a != b) & (a > 0) & (b > 0)
+        pairs |= {tuple(sorted(t)) for t in zip(a[m].tolist(), b[m].tolist())}
+    return sorted(pairs)
+
+
+def _cspace(occ, robot, res, ndimage):
+    """Cells where the drone's box fits: free cells at least robot/2 from any occupied cell centre (box metric)."""
+    r = max(1, int(math.ceil((robot / 2) / res - 0.5)))
+    grown = ndimage.binary_dilation(occ, structure=np.ones((2 * r + 1,) * 3, bool))
+    return ~grown
+
+
+def _largest_free_from(free, si, ndimage):
+    lab, _ = ndimage.label(free)
+    return lab == lab[si]
+
+
+def _dilate6(mask):
+    out = mask.copy()
+    out[1:] |= mask[:-1]
+    out[:-1] |= mask[1:]
+    out[:, 1:] |= mask[:, :-1]
+    out[:, :-1] |= mask[:, 1:]
+    out[:, :, 1:] |= mask[:, :, :-1]
+    out[:, :, :-1] |= mask[:, :, 1:]
+    return out
