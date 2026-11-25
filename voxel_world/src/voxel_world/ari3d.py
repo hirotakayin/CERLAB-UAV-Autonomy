@@ -636,8 +636,8 @@ def _plan_bridges(free, regions, solid_lab, islands, rng, p, res, snap, gap, ndi
             if free[low].mean() < 0.9 or not free[c_low] or free[c_up]:
                 continue                                  # the lower L must be corridor, its corner free; the other solid
             r_end = max(hw + 2, int(math.ceil(3.0 / res)))
-            ends = free & (((yy - P[0]) ** 2 + (xx - P[1]) ** 2 <= r_end ** 2) |
-                           ((yy - Q[0]) ** 2 + (xx - Q[1]) ** 2 <= r_end ** 2))
+            ends = free & (((np.abs(yy - P[0]) <= r_end) & (np.abs(xx - P[1]) <= r_end)) |   # square end zones
+                           ((np.abs(yy - Q[0]) <= r_end) & (np.abs(xx - Q[1]) <= r_end)))
             mid = up & ~ends & ~ndimage.binary_dilation(ends, iterations=hw)
             if mid.sum() == 0 or (~free[mid]).mean() < 0.8:
                 continue                                  # the upper L must cross the block, not other open space
