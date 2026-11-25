@@ -57,14 +57,15 @@ class Ari3DParams:
     shaft_min_m2: float = 30.0          # m2, a shaft needs this much floor ...
     shaft_max_m2: float = 150.0         # m2, ... and at most this much, so it stays a connector, not a hall
     shaft_min_width: float = 3.0        # m, ... and to be at least this wide somewhere
-    # split corridors: a horizontal slab through a corridor region, stopping deck_inset short of every neighbouring
-    # region, so the corridor has an upper and a lower passage that meet again at both ends (a loop in x-z / y-z)
-    max_decks: int = 2
-    deck_chance: float = 0.4
-    deck_slab: tuple = (1.2, 2.4)       # m, slab thickness (a real floor between two levels)
-    deck_passage: tuple = (4.0, 6.0)    # m, height of each passage, drawn separately for the lower and the upper one
-    deck_inset: float = 4.0             # m, open space kept between the slab's end and each neighbouring region
-    deck_min_m2: float = 40.0           # m2, the slab itself must cover at least this much
+    # bridges: where a corridor turns around the corner of a solid block, a second, enclosed route cuts across the top
+    # of the block between the corridor's two legs. The lower route is the corridor with its L corner, the upper one
+    # an L turning at the opposite corner of the same rectangle; they meet again at both ends (a loop in x-z / y-z)
+    max_bridges: int = 2
+    bridge_span: tuple = (8.0, 25.0)    # m, offset between the two ends, in both x and y
+    bridge_width: tuple = (3.2, 4.4)    # m
+    bridge_height: tuple = (4.0, 6.0)   # m, the enclosed passage's height
+    bridge_rise: tuple = (3.2, 5.2)     # m, its floor above the higher of the two corridor floors at the ends
+    bridge_tries: int = 600
     clear: tuple = (4.8, 7.2)           # m, a region's floor-to-ceiling height (leaves room for level steps above passage)
     sunken: tuple = (0.15, 3.0, 6.0)    # (share of regions, shallowest, deepest extra drop of the floor in m): pits
     low_island: tuple = (0.35, 1.5)     # (share of islands, least height above the floors around it in m)
@@ -112,7 +113,8 @@ class Ari3D:
                 break
         self.__dict__.update(best)
         self.info['accepted'] = bool(self.flat_reach <= p.max_flat_reach and self.margin_reach >= p.min_margin_reach
-                                     and self.info['staggers'] >= p.min_staggers)   # training should skip the rest
+                                     and self.info['staggers'] >= p.min_staggers
+                                     and self.info['reachable_share'] >= 0.99)   # training should skip the rest
 
     def _generate(self, png, seed, p, rng):
         from scipy import ndimage
@@ -222,28 +224,6 @@ class Ari3D:
                 kind[i] = 'sunken'
                 floor[i] -= snap(rng.uniform(*p.sunken[1:]))
 
-        # split corridors (decks): tall enough for two passages and a slab; the slab stops short of every neighbour
-        decks = []
-        order = [i for i in ids if kind[i] == 'level' and i != first]
-        rng.shuffle(order)
-        inset = max(1, int(math.ceil(p.deck_inset / res)))
-        for i in order:
-            if len(decks) >= p.max_decks or len(adj[i]) < 2 or rng.random() >= p.deck_chance:
-                continue
-            others = (regions > 0) & (regions != i)
-            mask = (regions == i) & ~ndimage.binary_dilation(others, iterations=inset)
-            if mask.sum() * res * res < p.deck_min_m2:
-                continue
-            lab_m, n_m = ndimage.label(mask)
-            if n_m > 1:                                       # keep one piece of slab
-                mask = lab_m == np.bincount(lab_m.ravel())[1:].argmax() + 1
-            slab = max(res, snap(rng.uniform(*p.deck_slab)))
-            lower = max(gap, snap(rng.uniform(*p.deck_passage)))
-            upper = max(gap, snap(rng.uniform(*p.deck_passage)))
-            ceil[i] = max(ceil[i], floor[i] + lower + slab + upper)
-            kind[i] = 'deck'
-            decks.append(dict(region=i, mask=mask, slab=slab, lower=lower, upper=upper))
-
         # 3. islands: low (fly over), full, or full with an overhanging lip
         solid_lab, n_solid = ndimage.label(~free)
         border = set(np.unique(np.concatenate([solid_lab[0], solid_lab[-1], solid_lab[:, 0], solid_lab[:, -1]]))) - {0}
@@ -265,6 +245,12 @@ class Ari3D:
                 islands[j] = dict(kind='lip', around=around, reach=rng.uniform(*p.overhang[1:]), frac=rng.uniform(0.2, 0.8))
             else:
                 islands[j] = dict(kind='full', around=around)
+
+        # bridges over the inside corners of the corridors (after the islands: a bridge makes the blocks it crosses full)
+        bridges = []
+        if p.max_bridges > 0:
+            bridges = _plan_bridges(free, regions, solid_lab, islands, rng, p, res, snap, gap, ndimage)
+        decks = bridges                                   # the solver and _build treat them alike below
 
         # 4. solve: shared height between touching regions; reachability (flatten as the fallback); then height
         #    gates until no single flight height reaches more than max_flat_reach of the footprint
@@ -317,11 +303,20 @@ class Ari3D:
                 counts = np.bincount(regions[yy, xx], minlength=regions.max() + 1)
                 counts[0] = 0
                 worst = int(counts.argmax())
-                if counts[worst] == 0:   # cut-off space only above islands: make the worst island full height
-                    isl = np.bincount(solid_lab[yy, xx], minlength=n_solid + 1)
-                    isl[0] = 0
-                    islands[int(isl.argmax())]['kind'] = 'full'
+                isl = np.bincount(solid_lab[yy, xx], minlength=n_solid + 1)
+                isl[0] = 0
+                if counts[worst] == 0 and int(isl.argmax()) in islands and islands[int(isl.argmax())]['kind'] != 'full':
+                    islands[int(isl.argmax())]['kind'] = 'full'   # cut-off space above a low island: make it full
                     self.flattened.append(('island', int(isl.argmax())))
+                elif decks and (counts[worst] == 0 or ('region', worst) in self.flattened):
+                    # opening the cut region did not help: drop the bridge nearest the cut-off space
+                    cy, cx = np.mean(yy), np.mean(xx)
+                    drop = min(range(len(decks)), key=lambda j: np.hypot(*(np.mean(np.nonzero(decks[j]['upper_band']),
+                                                                                   axis=1) - (cy, cx))))
+                    decks = decks[:drop] + decks[drop + 1:]
+                    self.flattened.append(('bridge', drop))
+                elif counts[worst] == 0:
+                    break                # nothing left to change: keep this draw (not accepted)
                 else:                    # open the region up to span its neighbours
                     floor[worst] = min(floor[n] for n in adj[worst]) if adj[worst] else floor[worst]
                     ceil[worst] = max(ceil[n] for n in adj[worst]) if adj[worst] else ceil[worst]
@@ -338,8 +333,7 @@ class Ari3D:
             comp = layer_lab == np.bincount(layer_lab.ravel())[1:].argmax() + 1
             options = []
             for (a_, b_), m in bounds.items():
-                if any(g['pair'] == (a_, b_) for g in gates) or not (m & comp).any() or \
-                        kind[a_] == 'deck' or kind[b_] == 'deck':
+                if any(g['pair'] == (a_, b_) for g in gates) or not (m & comp).any():
                     continue
                 lo, hi = max(floor[a_], floor[b_]) + base, min(ceil[a_], ceil[b_]) + base
                 if hi - lo < gap + 2 * res:
@@ -367,7 +361,7 @@ class Ari3D:
         self.surface = occ & _dilate6(self.explorable)
         self.origin = np.zeros(3)
         self.kind = kind
-        self.decks = decks
+        self.bridges = decks
         self.islands = islands
         self.info = dict(png=Path(self.png).name, seed=seed, size_m=[round(free.shape[1] * res, 1), round(free.shape[0] * res, 1),
                                                                       round(occ.shape[0] * res, 1)],
@@ -375,7 +369,7 @@ class Ari3D:
                          levels=len({round(floor[i], 1) for i in ids if kind[i] == 'level'}),
                          level_span_m=round(max(level.values()) - min(level.values()), 1),
                          sunken=sum(v == 'sunken' for v in kind.values()), islands=len(islands),
-                         staggers=sum(v == 'shaft' for v in kind.values()), split_corridors=len(decks),
+                         staggers=sum(v == 'shaft' for v in kind.values()), bridges=len(decks),
                          low_islands=sum(v['kind'] == 'low' for v in islands.values()),
                          lips=sum(v['kind'] == 'lip' for v in islands.values()),
                          gates=len(gates), hurdles=sum(g['kind'] == 'hurdle' for g in gates),
@@ -435,12 +429,14 @@ class Ari3D:
         f = np.where(np.isnan(fmap), np.inf, fmap)
         c = np.where(np.isnan(cmap), -np.inf, cmap)
         free3 = (zc[:, None, None] > f[None]) & (zc[:, None, None] < c[None])
-        for d in decks:                                   # the slab between the lower and the upper passage
-            i = d['region']
-            z0 = floor[i] + base + d['lower']
-            z1 = z0 + d['slab']
-            if ceil[i] + base - z1 >= self.gap - 1e-6:
-                free3[(zc > z0) & (zc < z1)] &= ~d['mask'][None]
+        for d in decks:                                   # bridge: an enclosed passage over the block, raised ends
+            rp, rq = int(regions[d['P']]), int(regions[d['Q']])
+            z0 = max(floor[rp], floor[rq]) + base + d['rise']
+            z1 = z0 + d['height']
+            free3[(zc > z0) & (zc < z1)] |= d['upper_band'][None]
+            f_end = np.where(np.isnan(fmap), np.inf, fmap)
+            free3 |= d['ends'][None] & (zc[:, None, None] > f_end[None]) & (zc[:, None, None] < z1)
+            d['z'] = (z0, z1)
         return ~free3, fmap, cmap, base
 
     def _start_point(self, rc, fmap, base):
@@ -470,7 +466,7 @@ class Ari3D:
         res, base = self.params.resolution, self.base
         ny, nx = self.free2d.shape
         ext = (0, nx * res, 0, ny * res)
-        fig, axs = plt.subplots(1, 5, figsize=(25, 5.4), gridspec_kw=dict(width_ratios=[1, 1, 1, 1.1, 1.1]))
+        fig, axs = plt.subplots(1, 6, figsize=(29, 5.4), gridspec_kw=dict(width_ratios=[1, 1, 1, 1.1, 1.1, 0.9]))
         rng = np.random.default_rng(1)
         lut = rng.uniform(0.35, 0.95, (self.regions.max() + 1, 3))
         lut[0] = 0.25
@@ -494,8 +490,8 @@ class Ari3D:
             for r in shafts:
                 ax.contour((self.regions == r).astype(float), levels=[0.5], origin='lower', extent=ext,
                            colors='#ff2bd6', linewidths=1.6)
-            for d in self.decks:
-                ax.contour(d['mask'].astype(float), levels=[0.5], origin='lower', extent=ext,
+            for d in self.bridges:
+                ax.contour(d['upper_band'].astype(float), levels=[0.5], origin='lower', extent=ext,
                            colors='white', linewidths=1.4, linestyles='--')
             ax.plot(self.start[0], self.start[1], marker='*', ms=15, color='#e0218a', mec='white', mew=0.8)
             ax.set_title(title, fontsize=10)
@@ -524,36 +520,53 @@ class Ari3D:
                   extent=(0, span, 0, cut.shape[0] * res), interpolation='nearest', aspect='auto')
         ax.set_title('side cut through %s' % what, fontsize=10)
         ax.tick_params(labelsize=8)
-        # a side cut along a split corridor
+        # plan of a bridge: lower route (the corridor, orange) and upper route (over the block, blue)
         ax = axs[4]
-        if self.decks:
-            ys, xs = np.nonzero(self.regions == self.decks[0]['region'])
-            along_x = np.ptp(xs) >= np.ptp(ys)
-            dm = self.decks[0]['mask']
-            my, mx = np.nonzero(dm)
-            line = int(np.median(my if along_x else mx))
-            cut = self.occupied[:, line, :] if along_x else self.occupied[:, :, line]
-            span = (nx if along_x else ny) * res
-            ax.imshow(np.where(cut, 0.25, 0.97), origin='lower', cmap='gray', vmin=0, vmax=1,
-                      extent=(0, span, 0, cut.shape[0] * res), interpolation='nearest', aspect='auto')
-            lo, hi = (xs.min(), xs.max()) if along_x else (ys.min(), ys.max())
-            ax.set_xlim(max(0, (lo - 25) * res), min(span, (hi + 25) * res))
-            if along_x:
-                axs[0].axhline((line + 0.5) * res, color='white', lw=0.8, ls=':')
-            else:
-                axs[0].axvline((line + 0.5) * res, color='white', lw=0.8, ls=':')
-            ax.set_title('side cut along a split corridor (white outline), %s = %.1f m:\nupper and lower passage, '
-                         'joined at both ends' % ('y' if along_x else 'x', (line + 0.5) * res), fontsize=10)
+        if self.bridges:
+            d = self.bridges[0]
+            img = np.where(self.free2d, 0.95, 0.30)
+            ax.imshow(img, origin='lower', extent=ext, cmap='gray', vmin=0, vmax=1, interpolation='nearest')
+            for m_, cn, col, ls, lab in ((d['lower_band'], d['c_low'], '#e07800', '-', 'lower route: the corridor'),
+                                         (d['upper_band'], d['c_up'], '#0d8fd0', '--', 'upper route: over the block')):
+                ax.contourf(m_.astype(float), levels=[0.5, 1.5], origin='lower', extent=ext, colors=[col], alpha=0.25)
+                pts = np.array([d['P'], cn, d['Q']], float)[:, ::-1] * res + res / 2
+                ax.plot(pts[:, 0], pts[:, 1], color=col, lw=2.0, ls=ls, marker='o', ms=4, label=lab)
+            ax.contour(d['ends'].astype(float), levels=[0.5], origin='lower', extent=ext, colors=['#ff2bd6'], linewidths=1.2)
+            pts = np.array([d['P'], d['Q']], float)
+            lo_, hi_ = pts.min(0) - 30, pts.max(0) + 30
+            ax.set_xlim(max(0, lo_[1] * res), min(nx * res, hi_[1] * res))
+            ax.set_ylim(max(0, lo_[0] * res), min(ny * res, hi_[0] * res))
+            ax.legend(fontsize=7.5, loc='upper right', framealpha=0.9)
+            ax.set_title('plan of a bridge: two different L routes between the same two ends\n(magenta: ends opened up to '
+                         'the bridge)', fontsize=10)
         else:
             ax.axis('off')
-            ax.set_title('no split corridor in this world', fontsize=10)
+            ax.set_title('no bridge in this world', fontsize=10)
+        ax.tick_params(labelsize=8)
+        # side cut along the bridge's first leg
+        ax = axs[5]
+        if self.bridges:
+            d = self.bridges[0]
+            (pr, pc), (cr, cc) = d['P'], d['c_up']
+            if pr == cr:                                  # first leg runs along x at row pr
+                cut, span, lo_, hi_, lab = self.occupied[:, pr, :], nx * res, min(pc, cc), max(pc, cc), 'y = %.1f m' % ((pr + .5) * res)
+            else:                                         # first leg runs along y at column pc
+                cut, span, lo_, hi_, lab = self.occupied[:, :, pc], ny * res, min(pr, cr), max(pr, cr), 'x = %.1f m' % ((pc + .5) * res)
+            ax.imshow(np.where(cut, 0.25, 0.97), origin='lower', cmap='gray', vmin=0, vmax=1,
+                      extent=(0, span, 0, cut.shape[0] * res), interpolation='nearest', aspect='auto')
+            ax.set_xlim(max(0, (lo_ - 15) * res), min(span, (hi_ + 15) * res))
+            ax.axhspan(*d['z'], color='#0d8fd0', alpha=0.12)
+            ax.set_title('side cut along the upper route\'s first leg (%s):\nthe bridge passage (blue band) through the '
+                         'block' % lab, fontsize=10)
+        else:
+            ax.axis('off')
         ax.tick_params(labelsize=8)
         i = self.info
         fig.suptitle('%s (seed %d): %.0f x %.0f m, %.1f m tall; %d regions on %d levels (span %.1f m); %d staggers (shafts, '
-                     'magenta); %d split corridors (white); %d pits; %d islands (%d low, %d lips); %d hurdles (orange), '
+                     'magenta); %d bridges (white); %d pits; %d islands (%d low, %d lips); %d hurdles (orange), '
                      '%d lintels (cyan); best single height reaches %.0f%%'
                      % (i['png'], self.seed, *i['size_m'], i['regions'], i['levels'], i['level_span_m'], i['staggers'],
-                        i['split_corridors'], i['sunken'], i['islands'], i['low_islands'], i['lips'], i['hurdles'],
+                        i['bridges'], i['sunken'], i['islands'], i['low_islands'], i['lips'], i['hurdles'],
                         i['lintels'], 100 * i['flat_reach']),
                      fontsize=10.5)
         fig.tight_layout(rect=(0, 0, 1, 0.93))
@@ -587,6 +600,59 @@ def _merge_small(regions, min_cells):
             regions[m] = 0 if len(ids) > 1 else i
             continue
         regions[m] = np.bincount(nb).argmax()
+
+
+def _plan_bridges(free, regions, solid_lab, islands, rng, p, res, snap, gap, ndimage):
+    """Up to max_bridges bridges. A bridge joins free points P and Q offset bridge_span in both x and y. The L from P
+    to Q turning at one corner of their rectangle runs along free space (the corridor: the lower route); the L turning
+    at the other corner runs mostly through solid (the block the corridor wraps around: the upper route, carved as an
+    enclosed passage above the corridor floors). Around P and Q the space is opened up to the bridge."""
+    ny, nx = free.shape
+    yy, xx = np.indices(free.shape)
+    dist = ndimage.distance_transform_edt(free)
+    lo_c, hi_c = (int(round(v / res)) for v in p.bridge_span)
+    out, used = [], np.zeros_like(free)
+
+    def band(a, b, hw):
+        return (yy >= min(a[0], b[0]) - hw) & (yy <= max(a[0], b[0]) + hw) & \
+               (xx >= min(a[1], b[1]) - hw) & (xx <= max(a[1], b[1]) + hw)
+
+    for _ in range(p.bridge_tries):
+        if len(out) >= p.max_bridges:
+            break
+        w = max(gap, snap(rng.uniform(*p.bridge_width)))
+        hw = max(1, int(round(w / res / 2)))
+        centre = np.argwhere((dist >= hw + 1) & ~used)
+        if len(centre) == 0:
+            break
+        P = tuple(centre[rng.integers(len(centre))])
+        dr, dc = rng.integers(lo_c, hi_c + 1) * rng.choice([-1, 1]), rng.integers(lo_c, hi_c + 1) * rng.choice([-1, 1])
+        Q = (P[0] + int(dr), P[1] + int(dc))
+        if not (0 <= Q[0] < ny and 0 <= Q[1] < nx) or dist[Q] < hw + 1 or used[Q]:
+            continue
+        for c_low, c_up in (((P[0], Q[1]), (Q[0], P[1])), ((Q[0], P[1]), (P[0], Q[1]))):
+            low = band(P, c_low, hw) | band(c_low, Q, hw)
+            up = band(P, c_up, hw) | band(c_up, Q, hw)
+            if free[low].mean() < 0.9 or not free[c_low] or free[c_up]:
+                continue                                  # the lower L must be corridor, its corner free; the other solid
+            r_end = max(hw + 2, int(math.ceil(3.0 / res)))
+            ends = free & (((yy - P[0]) ** 2 + (xx - P[1]) ** 2 <= r_end ** 2) |
+                           ((yy - Q[0]) ** 2 + (xx - Q[1]) ** 2 <= r_end ** 2))
+            mid = up & ~ends & ~ndimage.binary_dilation(ends, iterations=hw)
+            if mid.sum() == 0 or (~free[mid]).mean() < 0.8:
+                continue                                  # the upper L must cross the block, not other open space
+            lab_up = ndimage.label(up | ends)[0]
+            if lab_up[P] == 0 or lab_up[P] != lab_up[Q]:
+                continue
+            for j in np.unique(solid_lab[up & ~free]):    # blocks under the bridge stay full height
+                if j in islands:
+                    islands[j]['kind'] = 'full'
+            out.append(dict(P=P, Q=Q, c_low=c_low, c_up=c_up, width=w, lower_band=low & free, upper_band=up,
+                            ends=ends, rise=snap(rng.uniform(*p.bridge_rise)),
+                            height=max(gap, snap(rng.uniform(*p.bridge_height)))))
+            used |= ndimage.binary_dilation(up | low, iterations=int(round(6 / res)))
+            break
+    return out
 
 
 def _joined_by_shaft(a, b, adj, kind, floor, ceil, gap):

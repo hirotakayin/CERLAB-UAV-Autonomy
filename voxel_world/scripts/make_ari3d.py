@@ -42,7 +42,7 @@ def main():
     if a.flat:
         params = Ari3DParams(pixel=a.pixel, level_change=0.0, clear=(8.0, 8.0), sunken=(0.0, 3.0, 6.0),
                              low_island=(0.0, 1.5), overhang=(0.0, 1.6, 4.0), max_gates=0, max_flat_reach=1.0,
-                             max_staggers=0, min_staggers=0, max_decks=0)
+                             max_staggers=0, min_staggers=0, max_bridges=0)
     out = os.path.expanduser(a.out)
     os.makedirs(out, exist_ok=True)
     index = []
@@ -57,10 +57,10 @@ def main():
         index.append(dict(folder=os.path.basename(folder), **w.info))
         i = w.info
         print('%-24s %4.1f s  %s m  %d regions, %d levels (span %.1f m), %d pits  %d islands (%d low, %d lips)  '
-              '%d hurdles %d lintels  %d staggers  %d split  single-height reach %.0f%%  fixes %d' % (
+              '%d hurdles %d lintels  %d staggers  %d bridges  single-height reach %.0f%%  fixes %d' % (
                   os.path.basename(folder), time.time() - tic, 'x'.join('%.0f' % v for v in i['size_m']), i['regions'],
                   i['levels'], i['level_span_m'], i['sunken'], i['islands'], i['low_islands'], i['lips'], i['hurdles'],
-                  i['lintels'], i['staggers'], i['split_corridors'], 100 * i['flat_reach'], i['flattened']), flush=True)
+                  i['lintels'], i['staggers'], i['bridges'], 100 * i['flat_reach'], i['flattened']), flush=True)
     # merge with an existing index, so several runs into one --out keep every world listed
     path = os.path.join(out, 'index.json')
     if os.path.exists(path):

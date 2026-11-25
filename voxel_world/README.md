@@ -94,9 +94,10 @@ Generated sets are not kept in git: they come back exactly from the scripts belo
   (`~/rl/large-scale-DRL-exploration/maps`). Each region gets a level (floor and ceiling move together), some are
   pits, islands may be low or have lips, and hurdle/lintel gates close any single flight height that reaches too
   much. Staggers: a few compact shafts where the rooms on one side sit entirely above the
-  other side's ceilings. Split corridors: a slab splits a corridor into an upper and a lower passage that meet
-  again at both ends (a loop in the vertical plane). Every opening is at least `passage` (3.2 m) and reachable with 0.5 m clearance. `accepted` in stats.json
-  marks worlds that pass all three tests (single-height reach, clearance, at least one stagger). Needs scipy and scikit-image (`~/.venvs/ariadne/bin/python`).
+  other side's ceilings. Bridges: where a corridor turns around the corner of a solid block, an enclosed
+  passage cuts across the top of the block between the corridor's two legs, so there are two L routes between the
+  same ends, one low (the corridor) and one high (over the block): a loop in the vertical plane. Every opening is at least `passage` (3.2 m) and reachable with 0.5 m clearance. `accepted` in stats.json
+  marks worlds that pass all the tests (single-height reach, clearance, 3D reachability, at least one stagger). Needs scipy and scikit-image (`~/.venvs/ariadne/bin/python`).
   `make_ari3d.py --count 8 --seed 0 --out <dir>`; `--flat` gives the plain 2D map extruded. The default `--pixel 0.2`
   is ARiADNE's own scale (its env.py halves each PNG into 0.4 m cells; cells are solid if any pixel is).
 - `scripts/make_courses.py` (module `course.py`): evaluation courses, closed rooms with obstacles at every height
