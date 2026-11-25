@@ -49,7 +49,11 @@ def main():
     for k, png in enumerate(pngs):
         tic = time.time()
         seed = a.seed + k
-        w = Ari3D(png, seed=seed, params=params)
+        try:
+            w = Ari3D(png, seed=seed, params=params)
+        except (ValueError, RuntimeError) as err:  # e.g. the start is not in free configuration space
+            print('%-24s skipped: %s' % ('%s_s%d' % (os.path.splitext(os.path.basename(png))[0], seed), err), flush=True)
+            continue
         folder = os.path.join(out, '%s_s%d' % (os.path.splitext(os.path.basename(png))[0], seed))
         w.save(folder)
         if not a.no_preview:
