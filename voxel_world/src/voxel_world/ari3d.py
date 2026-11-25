@@ -40,14 +40,30 @@ FREE, SOLID, START = 194, 127, 208
 
 @dataclass
 class Ari3DParams:
-    pixel: float = 0.2                  # m per PNG pixel (ARiADNE: 0.4; 0.2 = half scale, maps of ~45-110 m)
+    pixel: float = 0.2                  # m per PNG pixel: 0.2 is ARiADNE's own scale (its env.py halves the PNG to 0.4 m cells)
     resolution: float = 0.4             # m, voxel size
     region_size: float = 10.0           # m, least distance between region seeds
     # levels: a region's floor and ceiling move together (a terrace), so no one flight height is open everywhere
     level_change: float = 0.7           # share of region links where the level changes
     level_step: tuple = (2.0, 4.0)      # m, size of a level change (up or down, cut to what passage allows)
     level_keep: float = 0.75            # chance a change keeps the direction of the change before it (drift)
-    level_range: tuple = (-8.0, 8.0)    # m, levels stay in this range around the start region's level
+    level_range: tuple = (-10.0, 10.0)  # m, levels stay in this range around the start region's level
+    # staggers: a shaft region whose neighbours on one side sit a whole room height (plus a slab) above the
+    # other side, so the upper rooms' floors are above the lower rooms' ceilings; the shaft spans both
+    stagger_chance: float = 0.6         # chance an eligible region becomes a shaft while the level walk passes it
+    max_staggers: int = 3
+    min_staggers: int = 1               # a world needs this many to be `accepted` (height draws are retried for it)
+    stagger_slab: tuple = (0.8, 2.0)    # m, solid between the lower room's ceiling and the upper room's floor
+    shaft_min_m2: float = 30.0          # m2, a shaft needs this much floor ...
+    shaft_max_m2: float = 150.0         # m2, ... and at most this much, so it stays a connector, not a hall
+    shaft_min_width: float = 3.0        # m, ... and to be at least this wide somewhere
+    # split corridors: a horizontal slab through a corridor region, stopping deck_inset short of every neighbouring
+    # region, so the corridor has an upper and a lower passage that meet again at both ends (a loop in x-z / y-z)
+    max_decks: int = 2
+    deck_chance: float = 0.4
+    deck_slab: tuple = (0.4, 0.8)       # m, slab thickness
+    deck_inset: float = 2.0             # m, open space kept between the slab's end and each neighbouring region
+    deck_min_m2: float = 40.0           # m2, the slab itself must cover at least this much
     clear: tuple = (4.8, 7.2)           # m, a region's floor-to-ceiling height (leaves room for level steps above passage)
     sunken: tuple = (0.15, 3.0, 6.0)    # (share of regions, shallowest, deepest extra drop of the floor in m): pits
     low_island: tuple = (0.35, 1.5)     # (share of islands, least height above the floors around it in m)
@@ -70,12 +86,11 @@ class Ari3DParams:
 
 
 def load_png(path):
-    """(free, start_px) from an ARiADNE map PNG: free [row, col] bool, start (row, col) at the 208 block's centre."""
+    """(free, image) from an ARiADNE map PNG: free [row, col] bool (as ARiADNE's env.py reads it) and the grey levels."""
     from skimage import io
     img = (io.imread(str(path), as_gray=True) * 255).astype(int)
     free = (img > 150) | ((img <= 80) & (img >= 50))
-    rr, cc = np.nonzero(img == START)
-    return free, (float(rr.mean()), float(cc.mean()))
+    return free, img
 
 
 class Ari3D:
@@ -87,33 +102,41 @@ class Ari3D:
         for trial in range(max(1, p.tries)):
             self._generate(png, seed, p, np.random.default_rng([seed, trial]))
             self.info['trial'] = trial
-            if best is None or (self.margin_reach >= p.min_margin_reach, -self.flat_reach) > \
-                    (best['margin_reach'] >= p.min_margin_reach, -best['flat_reach']):
+            key = lambda d: (d['margin_reach'] >= p.min_margin_reach, d['info']['staggers'] >= p.min_staggers,
+                             -d['flat_reach'])
+            if best is None or key(self.__dict__) > key(best):
                 best = dict(self.__dict__)
-            if self.flat_reach <= p.max_flat_reach and self.margin_reach >= p.min_margin_reach:
+            if self.flat_reach <= p.max_flat_reach and self.margin_reach >= p.min_margin_reach and \
+                    self.info['staggers'] >= p.min_staggers:
                 break
         self.__dict__.update(best)
-        self.info['accepted'] = bool(self.flat_reach <= p.max_flat_reach and
-                                     self.margin_reach >= p.min_margin_reach)   # training should skip the rest
+        self.info['accepted'] = bool(self.flat_reach <= p.max_flat_reach and self.margin_reach >= p.min_margin_reach
+                                     and self.info['staggers'] >= p.min_staggers)   # training should skip the rest
 
     def _generate(self, png, seed, p, rng):
         from scipy import ndimage
         self.params = p
         self.png, self.seed = str(png), seed
-        free_px, start_px = load_png(png)
+        free_px, img = load_png(png)
 
-        # 2D free grid at the voxel size (a cell is free if most of its pixels are), cropped around the free space
+        # 2D free grid at the voxel size, as ARiADNE's env.py builds it: block minimum, so a cell is solid when any of
+        # its pixels is; the start is ARiADNE's too (the 11th start-marker cell in row-major order)
         k = p.resolution / p.pixel
         if abs(k - round(k)) > 1e-6 or round(k) < 1:
             raise ValueError('resolution must be a whole multiple of pixel')
         k = int(round(k))
         h, w = (free_px.shape[0] // k) * k, (free_px.shape[1] // k) * k
-        free = free_px[:h, :w].reshape(h // k, k, w // k, k).mean(axis=(1, 3)) > 0.5
+        free = free_px[:h, :w].reshape(h // k, k, w // k, k).all(axis=(1, 3))
+        img_k = img[:h, :w].reshape(h // k, k, w // k, k).min(axis=(1, 3))
+        sr, sc = np.nonzero(img_k == START)
+        if len(sr) == 0:
+            raise ValueError('no start marker (208) left after downsampling')
+        start_cell = (int(sr[min(10, len(sr) - 1)]), int(sc[min(10, len(sr) - 1)]))
         rows, cols = np.nonzero(free)
         r0, r1 = max(0, rows.min() - 2), min(free.shape[0], rows.max() + 3)
         c0, c1 = max(0, cols.min() - 2), min(free.shape[1], cols.max() + 3)
         free = free[r0:r1, c0:c1]
-        start_rc = (int(start_px[0] // k) - r0, int(start_px[1] // k) - c0)
+        start_rc = (start_cell[0] - r0, start_cell[1] - c0)
         free = _largest_containing(free, start_rc, ndimage)
         self.free2d = free
         res = p.resolution
@@ -143,11 +166,36 @@ class Ari3D:
         first = int(regions[start_rc]) if regions[start_rc] > 0 else ids[0]
         level[first], queue = 0.0, [first]
         heading = {first: 1.0 if rng.random() < 0.5 else -1.0}
+        shafts = {}                                       # region -> (lower level, upper level)
+        area = {i: float((regions == i).sum()) * res * res for i in ids}
+        width = {i: 2 * float(dist[regions == i].max()) * res for i in ids}
         while queue:
             q = queue.pop(int(rng.integers(len(queue))))      # random order, so levels do not just follow BFS rings
             for c in sorted(adj[q]):
                 if c in level:
                     continue
+                onward = [n for n in adj[c] if n not in level and n != q]
+                if (len(shafts) < p.max_staggers and q not in shafts and onward and p.shaft_min_m2 <= area[c] <= p.shaft_max_m2
+                        and width[c] >= p.shaft_min_width and rng.random() < p.stagger_chance):
+                    # c becomes a shaft: the rooms past it jump a whole room height (and a slab) up or down
+                    up = heading[q] if rng.random() < p.level_keep else -heading[q]
+                    for sgn in (up, -up):
+                        jump = clear[q] + snap(rng.uniform(*p.stagger_slab)) if sgn > 0 else -(max(clear[n] for n in onward)
+                                                                                           + snap(rng.uniform(*p.stagger_slab)))
+                        if p.level_range[0] <= level[q] + jump <= p.level_range[1]:
+                            break
+                    else:
+                        jump = None
+                    if jump is not None:
+                        level[c] = level[q]
+                        heading[c] = math.copysign(1.0, jump)
+                        shafts[c] = (min(level[q], level[q] + jump), max(level[q], level[q] + jump))
+                        for n in onward:                  # the far side starts on the new level
+                            level[n] = level[q] + jump
+                            heading[n] = heading[c]
+                            queue.append(n)
+                        queue.append(c)
+                        continue
                 d = 0.0
                 heading[c] = heading[q] if rng.random() < p.level_keep else -heading[q]
                 if rng.random() < p.level_change:
@@ -162,10 +210,36 @@ class Ari3D:
         floor = {i: level[i] for i in ids}
         ceil = {i: level[i] + clear[i] for i in ids}
         kind = {i: 'level' for i in ids}
+        for c, (lo, hi) in shafts.items():                # a shaft spans from the lower floor to the upper ceiling
+            floor[c] = lo
+            ceil[c] = hi + max(clear[n] for n in adj[c])
+            kind[c] = 'shaft'
         for i in ids:
+            if kind[i] == 'shaft':
+                continue
             if rng.random() < p.sunken[0]:
                 kind[i] = 'sunken'
                 floor[i] -= snap(rng.uniform(*p.sunken[1:]))
+
+        # split corridors (decks): tall enough for two passages and a slab; the slab stops short of every neighbour
+        decks = []
+        order = [i for i in ids if kind[i] == 'level' and i != first]
+        rng.shuffle(order)
+        inset = max(1, int(math.ceil(p.deck_inset / res)))
+        for i in order:
+            if len(decks) >= p.max_decks or len(adj[i]) < 2 or rng.random() >= p.deck_chance:
+                continue
+            others = (regions > 0) & (regions != i)
+            mask = (regions == i) & ~ndimage.binary_dilation(others, iterations=inset)
+            if mask.sum() * res * res < p.deck_min_m2:
+                continue
+            lab_m, n_m = ndimage.label(mask)
+            if n_m > 1:                                       # keep one piece of slab
+                mask = lab_m == np.bincount(lab_m.ravel())[1:].argmax() + 1
+            slab = snap(rng.uniform(*p.deck_slab)) or res
+            ceil[i] = max(ceil[i], floor[i] + 2 * gap + slab)
+            kind[i] = 'deck'
+            decks.append(dict(region=i, mask=mask, slab=slab))
 
         # 3. islands: low (fly over), full, or full with an overhanging lip
         solid_lab, n_solid = ndimage.label(~free)
@@ -201,11 +275,13 @@ class Ari3D:
         for attempt in range(len(ids) + p.max_gates + 2):
             for _ in range(4):
                 for a_, b_ in pairs:
+                    if _joined_by_shaft(a_, b_, adj, kind, floor, ceil, gap):
+                        continue                          # a stagger: the two meet only through the shaft beside them
                     need = max(floor[a_], floor[b_]) + gap
                     for i in (a_, b_):
                         if ceil[i] < need:
                             ceil[i] = need
-            occ, fmap, cmap, base = self._build(free, regions, solid_lab, islands, floor, ceil, gates)
+            occ, fmap, cmap, base = self._build(free, regions, solid_lab, islands, floor, ceil, gates, decks)
             start = self._start_point(start_rc, fmap, base)
             cfree = _cspace(occ, p.robot_size, res, ndimage)
             si = tuple(np.floor(start / res).astype(int)[::-1])
@@ -259,7 +335,8 @@ class Ari3D:
             comp = layer_lab == np.bincount(layer_lab.ravel())[1:].argmax() + 1
             options = []
             for (a_, b_), m in bounds.items():
-                if any(g['pair'] == (a_, b_) for g in gates) or not (m & comp).any():
+                if any(g['pair'] == (a_, b_) for g in gates) or not (m & comp).any() or \
+                        kind[a_] == 'deck' or kind[b_] == 'deck':
                     continue
                 lo, hi = max(floor[a_], floor[b_]) + base, min(ceil[a_], ceil[b_]) + base
                 if hi - lo < gap + 2 * res:
@@ -287,6 +364,7 @@ class Ari3D:
         self.surface = occ & _dilate6(self.explorable)
         self.origin = np.zeros(3)
         self.kind = kind
+        self.decks = decks
         self.islands = islands
         self.info = dict(png=Path(self.png).name, seed=seed, size_m=[round(free.shape[1] * res, 1), round(free.shape[0] * res, 1),
                                                                       round(occ.shape[0] * res, 1)],
@@ -294,6 +372,7 @@ class Ari3D:
                          levels=len({round(floor[i], 1) for i in ids if kind[i] == 'level'}),
                          level_span_m=round(max(level.values()) - min(level.values()), 1),
                          sunken=sum(v == 'sunken' for v in kind.values()), islands=len(islands),
+                         staggers=sum(v == 'shaft' for v in kind.values()), split_corridors=len(decks),
                          low_islands=sum(v['kind'] == 'low' for v in islands.values()),
                          lips=sum(v['kind'] == 'lip' for v in islands.values()),
                          gates=len(gates), hurdles=sum(g['kind'] == 'hurdle' for g in gates),
@@ -305,7 +384,7 @@ class Ari3D:
                          reachable_share=round(float(reach.sum() / cfree.sum()), 4))
 
     # ---------------------------------------------------------------------------------------------------------
-    def _build(self, free, regions, solid_lab, islands, floor, ceil, gates):
+    def _build(self, free, regions, solid_lab, islands, floor, ceil, gates, decks=()):
         """Occupancy [z, y, x], the floor and ceiling maps (m, absolute, NaN on full solid), and the start level's z."""
         from scipy import ndimage
         p, res = self.params, self.params.resolution
@@ -353,6 +432,12 @@ class Ari3D:
         f = np.where(np.isnan(fmap), np.inf, fmap)
         c = np.where(np.isnan(cmap), -np.inf, cmap)
         free3 = (zc[:, None, None] > f[None]) & (zc[:, None, None] < c[None])
+        for d in decks:                                   # the slab between the lower and the upper passage
+            i = d['region']
+            z0 = floor[i] + base + self.gap
+            z1 = z0 + d['slab']
+            if ceil[i] + base - z1 >= self.gap - 1e-6:
+                free3[(zc > z0) & (zc < z1)] &= ~d['mask'][None]
         return ~free3, fmap, cmap, base
 
     def _start_point(self, rc, fmap, base):
@@ -382,7 +467,7 @@ class Ari3D:
         res, base = self.params.resolution, self.base
         ny, nx = self.free2d.shape
         ext = (0, nx * res, 0, ny * res)
-        fig, axs = plt.subplots(1, 4, figsize=(20, 5.2), gridspec_kw=dict(width_ratios=[1, 1, 1, 1.15]))
+        fig, axs = plt.subplots(1, 5, figsize=(25, 5.4), gridspec_kw=dict(width_ratios=[1, 1, 1, 1.1, 1.1]))
         rng = np.random.default_rng(1)
         lut = rng.uniform(0.35, 0.95, (self.regions.max() + 1, 3))
         lut[0] = 0.25
@@ -402,23 +487,71 @@ class Ari3D:
                 ys, xs = np.nonzero(g['strip'])
                 ax.scatter((xs + 0.5) * res, (ys + 0.5) * res, s=2, marker='s', linewidths=0,
                            color='#ff8c00' if g['kind'] == 'hurdle' else '#00c8ff')
+            shafts = [r for r, k in self.kind.items() if k == 'shaft']
+            for r in shafts:
+                ax.contour((self.regions == r).astype(float), levels=[0.5], origin='lower', extent=ext,
+                           colors='#ff2bd6', linewidths=1.6)
+            for d in self.decks:
+                ax.contour(d['mask'].astype(float), levels=[0.5], origin='lower', extent=ext,
+                           colors='white', linewidths=1.4, linestyles='--')
             ax.plot(self.start[0], self.start[1], marker='*', ms=15, color='#e0218a', mec='white', mew=0.8)
             ax.set_title(title, fontsize=10)
             ax.tick_params(labelsize=8)
-        # a side cut through the start
+        # a side cut: through the first shaft (along its longer side), else through the start
         ax = axs[3]
-        row = int(self.start[1] // res)
-        cut = self.occupied[:, row, :]
+        shafts = [r for r, k in self.kind.items() if k == 'shaft']
+        if shafts:
+            ys, xs = np.nonzero(self.regions == shafts[0])
+            along_x = np.ptp(xs) >= np.ptp(ys)
+            line = int(np.median(ys if along_x else xs))
+            cut = self.occupied[:, line, :] if along_x else self.occupied[:, :, line]
+            what = 'a shaft (magenta outline), %s = %.1f m' % ('y' if along_x else 'x', (line + 0.5) * res)
+            span = (nx if along_x else ny) * res
+            if along_x:
+                axs[0].axhline((line + 0.5) * res, color='#ff2bd6', lw=0.8, ls='--')
+            else:
+                axs[0].axvline((line + 0.5) * res, color='#ff2bd6', lw=0.8, ls='--')
+        else:
+            line = int(self.start[1] // res)
+            cut = self.occupied[:, line, :]
+            what = 'the start, y = %.1f m' % self.start[1]
+            span = nx * res
+            ax.plot(self.start[0], self.start[2], marker='*', ms=15, color='#e0218a', mec='white', mew=0.8)
         ax.imshow(np.where(cut, 0.25, 0.97), origin='lower', cmap='gray', vmin=0, vmax=1,
-                  extent=(0, nx * res, 0, cut.shape[0] * res), interpolation='nearest', aspect='auto')
-        ax.plot(self.start[0], self.start[2], marker='*', ms=15, color='#e0218a', mec='white', mew=0.8)
-        ax.set_title('side cut through the start (y = %.1f m)' % self.start[1], fontsize=10)
+                  extent=(0, span, 0, cut.shape[0] * res), interpolation='nearest', aspect='auto')
+        ax.set_title('side cut through %s' % what, fontsize=10)
+        ax.tick_params(labelsize=8)
+        # a side cut along a split corridor
+        ax = axs[4]
+        if self.decks:
+            ys, xs = np.nonzero(self.regions == self.decks[0]['region'])
+            along_x = np.ptp(xs) >= np.ptp(ys)
+            dm = self.decks[0]['mask']
+            my, mx = np.nonzero(dm)
+            line = int(np.median(my if along_x else mx))
+            cut = self.occupied[:, line, :] if along_x else self.occupied[:, :, line]
+            span = (nx if along_x else ny) * res
+            ax.imshow(np.where(cut, 0.25, 0.97), origin='lower', cmap='gray', vmin=0, vmax=1,
+                      extent=(0, span, 0, cut.shape[0] * res), interpolation='nearest', aspect='auto')
+            lo, hi = (xs.min(), xs.max()) if along_x else (ys.min(), ys.max())
+            ax.set_xlim(max(0, (lo - 25) * res), min(span, (hi + 25) * res))
+            if along_x:
+                axs[0].axhline((line + 0.5) * res, color='white', lw=0.8, ls=':')
+            else:
+                axs[0].axvline((line + 0.5) * res, color='white', lw=0.8, ls=':')
+            ax.set_title('side cut along a split corridor (white outline), %s = %.1f m:\nupper and lower passage, '
+                         'joined at both ends' % ('y' if along_x else 'x', (line + 0.5) * res), fontsize=10)
+        else:
+            ax.axis('off')
+            ax.set_title('no split corridor in this world', fontsize=10)
         ax.tick_params(labelsize=8)
         i = self.info
-        fig.suptitle('%s (seed %d): %.0f x %.0f m, %.1f m tall; %d regions on %d levels (span %.1f m), %d pits; %d islands '
-                     '(%d low, %d lips); gates: %d hurdles (orange), %d lintels (cyan); best single height reaches %.0f%%'
-                     % (i['png'], self.seed, *i['size_m'], i['regions'], i['levels'], i['level_span_m'], i['sunken'],
-                        i['islands'], i['low_islands'], i['lips'], i['hurdles'], i['lintels'], 100 * i['flat_reach']),
+        fig.suptitle('%s (seed %d): %.0f x %.0f m, %.1f m tall; %d regions on %d levels (span %.1f m); %d staggers (shafts, '
+                     'magenta); %d split corridors (white); %d pits; %d islands (%d low, %d lips); %d hurdles (orange), '
+                     '%d lintels (cyan); best single height reaches %.0f%%'
+                     % (i['png'], self.seed, *i['size_m'], i['regions'], i['levels'], i['level_span_m'], i['staggers'],
+                        i['split_corridors'], i['sunken'], i['islands'], i['low_islands'], i['lips'], i['hurdles'],
+                        i['lintels'], 100 * i['flat_reach']),
                      fontsize=10.5)
         fig.tight_layout(rect=(0, 0, 1, 0.93))
         fig.savefig(path, dpi=80)
@@ -451,6 +584,19 @@ def _merge_small(regions, min_cells):
             regions[m] = 0 if len(ids) > 1 else i
             continue
         regions[m] = np.bincount(nb).argmax()
+
+
+def _joined_by_shaft(a, b, adj, kind, floor, ceil, gap):
+    """True when touching regions a and b share less than `gap` of height but a shaft next to both spans them."""
+    if kind[a] == 'shaft' or kind[b] == 'shaft':
+        return False
+    if min(ceil[a], ceil[b]) - max(floor[a], floor[b]) >= gap:
+        return False
+    for s in adj[a] & adj[b]:
+        if kind[s] == 'shaft' and floor[s] <= min(floor[a], floor[b]) + 1e-6 and \
+                ceil[s] >= max(floor[a], floor[b]) + gap - 1e-6:
+            return True
+    return False
 
 
 def _boundary(regions, a, b):

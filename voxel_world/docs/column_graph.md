@@ -6,7 +6,7 @@ How the learned 3D planner keeps its graph at 2D size. This is what the pruning 
 
 ![collapse graph](column_graph.png)
 
-Figure: `scripts/column_graph_figure.py --world ~/mission_runs/ari3d_v3/img_1315_s2 --step 40 --later 12 --out docs/column_graph.png`.
+Figure (made on an ari3d_v3 world, generator at commit 4de5d80): `scripts/column_graph_figure.py --world ~/mission_runs/ari3d_v3/img_1315_s2 --step 40 --later 12 --out docs/column_graph.png`.
 It runs the study's simulator, freezes it after 40 steps, and draws what it actually holds. It is not a sketch.
 
 ## The problem it solves
@@ -63,7 +63,7 @@ It limits **where the drone can choose to go next**. It does not limit **how the
 
 ## How this goes into the trainer (planned, not built yet)
 
-- Columns every 4 m (ARiADNE's `NODE_RESOLUTION`), so half-scale ari3d worlds have about 140–200 columns. That
+- Columns every 4 m (ARiADNE's `NODE_RESOLUTION`), so ari3d worlds (ARiADNE's own scale) have about 140–200 columns. That
   fits ARiADNE's 360-node padding.
 - Node inputs grow from 4 (x, y, utility, visited) to about 7: the kept height relative to the drone, the number
   of separate free gaps in the column, and the column's free height.
@@ -74,6 +74,7 @@ It limits **where the drone can choose to go next**. It does not limit **how the
 
 ## Where the numbers come from
 
-`scripts/prune_study.py` on four ari3d_v3 worlds (`make_ari3d.py --pngs img_1609 627 img_1315 img_4537 --seed 0`),
+`scripts/prune_study.py` on four ari3d_v3 worlds (`make_ari3d.py --pngs img_1609 627 img_1315 img_4537 --seed 0` at
+commit 4de5d80, before staggers and split corridors were added),
 with a greedy explorer (best utility per metre of route) standing in for the policy, teleporting between nodes,
 and routes on the full lattice for every strategy. Results and charts: claude.ai artifact "3D node pruning study".

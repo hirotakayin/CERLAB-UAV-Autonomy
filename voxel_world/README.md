@@ -93,9 +93,12 @@ Generated sets are not kept in git: they come back exactly from the scripts belo
 - `scripts/make_ari3d.py` (module `ari3d.py`): 3D training worlds from ARiADNE's map PNGs
   (`~/rl/large-scale-DRL-exploration/maps`). Each region gets a level (floor and ceiling move together), some are
   pits, islands may be low or have lips, and hurdle/lintel gates close any single flight height that reaches too
-  much. Every opening is at least `passage` (3.2 m) and reachable with 0.5 m clearance. `accepted` in stats.json
-  marks worlds that pass both tests. Needs scipy and scikit-image (`~/.venvs/ariadne/bin/python`).
-  `make_ari3d.py --count 8 --seed 0 --out <dir>`; `--flat` gives the plain 2D map extruded.
+  much. Staggers: a few compact shafts where the rooms on one side sit entirely above the
+  other side's ceilings. Split corridors: a slab splits a corridor into an upper and a lower passage that meet
+  again at both ends (a loop in the vertical plane). Every opening is at least `passage` (3.2 m) and reachable with 0.5 m clearance. `accepted` in stats.json
+  marks worlds that pass all three tests (single-height reach, clearance, at least one stagger). Needs scipy and scikit-image (`~/.venvs/ariadne/bin/python`).
+  `make_ari3d.py --count 8 --seed 0 --out <dir>`; `--flat` gives the plain 2D map extruded. The default `--pixel 0.2`
+  is ARiADNE's own scale (its env.py halves each PNG into 0.4 m cells; cells are solid if any pixel is).
 - `scripts/make_courses.py` (module `course.py`): evaluation courses, closed rooms with obstacles at every height
   (`--layout room`, test seeds 0-99). `--layout maze` is an earlier training layout, kept for reference.
 - `scripts/view_check.py`: how much surface the best 1-2 viewpoints see (line of sight in the lidar's band).
