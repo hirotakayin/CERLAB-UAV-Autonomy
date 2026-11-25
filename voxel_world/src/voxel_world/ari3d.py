@@ -61,8 +61,9 @@ class Ari3DParams:
     # region, so the corridor has an upper and a lower passage that meet again at both ends (a loop in x-z / y-z)
     max_decks: int = 2
     deck_chance: float = 0.4
-    deck_slab: tuple = (0.4, 0.8)       # m, slab thickness
-    deck_inset: float = 2.0             # m, open space kept between the slab's end and each neighbouring region
+    deck_slab: tuple = (1.2, 2.4)       # m, slab thickness (a real floor between two levels)
+    deck_passage: tuple = (4.0, 6.0)    # m, height of each passage, drawn separately for the lower and the upper one
+    deck_inset: float = 4.0             # m, open space kept between the slab's end and each neighbouring region
     deck_min_m2: float = 40.0           # m2, the slab itself must cover at least this much
     clear: tuple = (4.8, 7.2)           # m, a region's floor-to-ceiling height (leaves room for level steps above passage)
     sunken: tuple = (0.15, 3.0, 6.0)    # (share of regions, shallowest, deepest extra drop of the floor in m): pits
@@ -236,10 +237,12 @@ class Ari3D:
             lab_m, n_m = ndimage.label(mask)
             if n_m > 1:                                       # keep one piece of slab
                 mask = lab_m == np.bincount(lab_m.ravel())[1:].argmax() + 1
-            slab = snap(rng.uniform(*p.deck_slab)) or res
-            ceil[i] = max(ceil[i], floor[i] + 2 * gap + slab)
+            slab = max(res, snap(rng.uniform(*p.deck_slab)))
+            lower = max(gap, snap(rng.uniform(*p.deck_passage)))
+            upper = max(gap, snap(rng.uniform(*p.deck_passage)))
+            ceil[i] = max(ceil[i], floor[i] + lower + slab + upper)
             kind[i] = 'deck'
-            decks.append(dict(region=i, mask=mask, slab=slab))
+            decks.append(dict(region=i, mask=mask, slab=slab, lower=lower, upper=upper))
 
         # 3. islands: low (fly over), full, or full with an overhanging lip
         solid_lab, n_solid = ndimage.label(~free)
@@ -434,7 +437,7 @@ class Ari3D:
         free3 = (zc[:, None, None] > f[None]) & (zc[:, None, None] < c[None])
         for d in decks:                                   # the slab between the lower and the upper passage
             i = d['region']
-            z0 = floor[i] + base + self.gap
+            z0 = floor[i] + base + d['lower']
             z1 = z0 + d['slab']
             if ceil[i] + base - z1 >= self.gap - 1e-6:
                 free3[(zc > z0) & (zc < z1)] &= ~d['mask'][None]
