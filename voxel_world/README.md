@@ -101,5 +101,6 @@ Generated sets are not kept in git: they come back exactly from the scripts belo
 - `scripts/view_check.py`: how much surface the best 1-2 viewpoints see (line of sight in the lidar's band).
 - `scripts/slice_check.py`: per-column height options ("slices") on the excavation worlds: node counts,
   connectivity and surfaces seen.
+- `docs/column_graph.md`: how the one-node-per-column graph works, with a figure from `scripts/column_graph_figure.py`.
 - `scripts/prune_study.py`: compares node-pruning strategies (full lattice, slices, utility gating, one height per
   column) with a greedy explorer on `make_ari3d` worlds.
