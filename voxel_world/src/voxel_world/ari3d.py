@@ -62,7 +62,8 @@ class Ari3DParams:
     # an L turning at the opposite corner of the same rectangle; they meet again at both ends (a loop in x-z / y-z)
     max_bridges: int = 2
     bridge_span: tuple = (8.0, 25.0)    # m, offset between the two ends, in both x and y
-    bridge_width: tuple = (3.2, 4.4)    # m
+    bridge_width: tuple = (4.8, 6.0)    # m; at least 4.8 so the 4 m planner lattice (minus 0.4 m clearance a side)
+                                        # always has a node row inside (at 3.2-4.4 m, 1.6 % of bridges had none)
     bridge_height: tuple = (4.0, 6.0)   # m, the enclosed passage's height
     bridge_rise: tuple = (3.2, 5.2)     # m, its floor above the higher of the two corridor floors at the ends
     bridge_tries: int = 600
