@@ -93,13 +93,16 @@ class Ari3DParams:
     #              height so the struts leave a passage above and below
     #   'lwalls'   full-height L-shaped walls, free-standing or growing out of a wall, that split the hall into bays
     #   'mixed'    L walls first, then a sparse pillar grid (+ struts) in the space they leave
-    # Every gap left is at least clutter_gap wide (2D check: the free space eroded by half of it keeps its pieces)
+    # Every gap left is at least clutter_gap (L walls) / pillar_gap wide (2D check: the free space eroded by half of it
+    # keeps its pieces)
     clutter: tuple = ()                 # kinds to draw from per zone: () off, any of 'pillars', 'lwalls', 'mixed'
     clutter_weights: tuple = ()         # draw weights, one per kind in `clutter` (empty: equal)
     open_radius: float = 4.0            # m, an open zone holds discs at least this big (8 m across)
     clutter_min_m2: float = 250.0       # m2, least zone area that gets clutter
     clutter_chance: float = 0.8         # share of big zones that get clutter (some halls stay open)
-    clutter_gap: float = 2.8            # m, least free width left between clutter and anything solid
+    clutter_gap: float = 4.4            # m, least free width left between an L wall and anything solid. The planner's
+                                        # lattice (4 m columns) needs this: at 2.8 m bays were cut off its graph
+    pillar_gap: float = 3.2             # m, the same for a pillar (a free-standing pillar cannot close off a bay)
     clutter_clear: tuple = (8.0, 12.0)  # m, floor-to-ceiling height of a pillar hall's regions
     pillar_size: tuple = (0.4, 1.2)     # m, square pillar side
     pillar_spacing: tuple = (4.0, 7.0)  # m, grid pitch, drawn per axis
@@ -804,7 +807,8 @@ def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
     core = free & (dist >= r_open)
     zone = free & (ndimage.distance_transform_edt(~core) <= r_open) if core.any() else np.zeros_like(free)
     lab, n = ndimage.label(zone)
-    g = int(round(p.clutter_gap / res))                   # free cells to keep between clutter and other solid
+    g = int(round(p.clutter_gap / res))                   # free cells to keep between an L wall and other solid
+    gp = int(round(p.pillar_gap / res))                   # ... and between a pillar and other solid
     er = _disk(max(1, g // 2))
     cur = free.copy()
     mask = np.zeros_like(free)
@@ -816,7 +820,7 @@ def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
     n_pieces = [pieces(cur)]
     out = dict(mask=mask, hall_mask=hall, struts=[], zones=[], pillars=0, lwalls=0, strut_links=0)
 
-    def stamp(S, exempt=None, check_pieces=False):
+    def stamp(S, exempt=None, check_pieces=False, g=g):
         if not S.any() or (S & ~cur).any() or (S & near_start).any():
             return False
         ys, xs = np.nonzero(S)
@@ -901,7 +905,7 @@ def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
                     s = max(1, int(round(rng.uniform(*p.pillar_size) / res)))
                     S = np.zeros_like(free)
                     S[max(0, cy - s // 2):cy - s // 2 + s, max(0, cx - s // 2):cx - s // 2 + s] = True
-                    if stamp(S):
+                    if stamp(S, g=gp):
                         placed[(i, j)] = (cy, cx)
         if placed:
             hall |= zm
