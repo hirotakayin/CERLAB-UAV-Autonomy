@@ -34,14 +34,18 @@ def main():
     ap.add_argument('--pixel', type=float, default=Ari3DParams.pixel, help="m per PNG pixel (0.2 = ARiADNE's own scale)")
     ap.add_argument('--flat', action='store_true', help='no height variation: the 2D map extruded (sanity check)')
     ap.add_argument('--no-preview', action='store_true')
-    ap.add_argument('--clutter', choices=['none', 'pillars', 'lwalls', 'both'], default='none',
-                    help='clutter in big open zones: pillars with struts, L walls, or either per zone')
+    ap.add_argument('--clutter', default='none',
+                    help="clutter in big open zones: none, or kinds drawn per zone, comma-separated from pillars "
+                         "(with struts), lwalls, mixed (L walls + sparse pillars); 'both' = pillars,lwalls")
+    ap.add_argument('--clutter-weights', default='', help='draw weights per --clutter kind, comma-separated')
     a = ap.parse_args()
 
     pngs = a.pngs or list(np.random.default_rng(a.seed).choice(sorted(glob.glob(os.path.join(a.maps, '*.png'))), a.count,
                                                               replace=False))
-    clutter = {'none': (), 'pillars': ('pillars',), 'lwalls': ('lwalls',), 'both': ('pillars', 'lwalls')}[a.clutter]
-    params = Ari3DParams(pixel=a.pixel, clutter=clutter)
+    clutter = () if a.clutter == 'none' else ('pillars', 'lwalls') if a.clutter == 'both' else tuple(a.clutter.split(','))
+    assert set(clutter) <= {'pillars', 'lwalls', 'mixed'}, clutter
+    weights = tuple(float(v) for v in a.clutter_weights.split(',')) if a.clutter_weights else ()
+    params = Ari3DParams(pixel=a.pixel, clutter=clutter, clutter_weights=weights)
     if a.flat:
         params = Ari3DParams(pixel=a.pixel, level_change=0.0, clear=(8.0, 8.0), sunken=(0.0, 3.0, 6.0),
                              low_island=(0.0, 1.5), overhang=(0.0, 1.6, 4.0), max_gates=0, max_flat_reach=1.0,

@@ -92,8 +92,10 @@ class Ari3DParams:
     #              (excavation1: 0.4 m pillars 4 m x 6 m apart, one strut layer); the hall's regions get clutter_clear of
     #              height so the struts leave a passage above and below
     #   'lwalls'   full-height L-shaped walls, free-standing or growing out of a wall, that split the hall into bays
+    #   'mixed'    L walls first, then a sparse pillar grid (+ struts) in the space they leave
     # Every gap left is at least clutter_gap wide (2D check: the free space eroded by half of it keeps its pieces)
-    clutter: tuple = ()                 # kinds to draw from: () off, ('pillars',), ('lwalls',), ('pillars', 'lwalls')
+    clutter: tuple = ()                 # kinds to draw from per zone: () off, any of 'pillars', 'lwalls', 'mixed'
+    clutter_weights: tuple = ()         # draw weights, one per kind in `clutter` (empty: equal)
     open_radius: float = 4.0            # m, an open zone holds discs at least this big (8 m across)
     clutter_min_m2: float = 250.0       # m2, least zone area that gets clutter
     clutter_chance: float = 0.8         # share of big zones that get clutter (some halls stay open)
@@ -103,14 +105,15 @@ class Ari3DParams:
     pillar_spacing: tuple = (4.0, 7.0)  # m, grid pitch, drawn per axis
     pillar_jitter: float = 0.4          # m, random shift of each pillar off the grid
     pillar_skip: float = 0.1            # share of grid points left empty
+    mixed_pillar_skip: float = 0.5      # the same in a 'mixed' zone (pillars between the L walls stay sparse)
     strut_chance: float = 0.6           # share of pillar-pillar (and pillar-wall) links that get a strut, per layer
     strut_layers: tuple = (1, 2)        # number of strut heights per hall
     strut_thick: float = 0.4            # m, a strut's depth (z) and width
-    lwall_area: float = 120.0           # m2 of zone per L wall
-    lwall_max: int = 6                  # L walls per zone at most
-    lwall_leg: tuple = (4.0, 10.0)      # m, each leg's length
+    lwall_area: float = 60.0            # m2 of zone per L wall (tried; walls that do not fit are dropped)
+    lwall_max: int = 12                 # L walls per zone at most
+    lwall_leg: tuple = (5.0, 12.0)      # m, each leg's length
     lwall_thick: tuple = (0.4, 0.8)     # m
-    lwall_attach: float = 0.5           # share of L walls that grow out of a wall (their first leg starts at it)
+    lwall_attach: float = 0.6           # share of L walls that grow out of a wall (their first leg starts at it): bays
 
 
 def load_png(path):
@@ -837,9 +840,52 @@ def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
         area = float(zm.sum()) * res * res
         if area < p.clutter_min_m2 or rng.random() > p.clutter_chance:
             continue
-        kind = p.clutter[int(rng.integers(len(p.clutter)))]
+        wts = np.asarray(p.clutter_weights if len(p.clutter_weights) == len(p.clutter) else [1.0] * len(p.clutter), float)
+        kind = p.clutter[int(rng.choice(len(p.clutter), p=wts / wts.sum()))]
         info = dict(kind=kind, area_m2=round(area, 1))
-        if kind == 'pillars':
+        made, placed = 0, {}
+        if kind in ('lwalls', 'mixed'):
+            n_l = int(np.clip(round(area / p.lwall_area), 1, p.lwall_max))
+            wall_adj = zm & (dist <= 1.5)
+            inner = zm & (ndimage.distance_transform_edt(cur) >= g + 1)
+            for _ in range(n_l):
+                for _try in range(60):
+                    attach = rng.random() < p.lwall_attach
+                    t = max(1, int(round(rng.uniform(*p.lwall_thick) / res)))
+                    L1, L2 = (int(round(rng.uniform(*p.lwall_leg) / res)) for _ in range(2))
+                    pool = np.argwhere(wall_adj & cur if attach else inner & cur)
+                    if not len(pool):
+                        continue
+                    c = pool[int(rng.integers(len(pool)))]
+                    if attach:                             # first leg points away from the wall it starts at
+                        opts = [d for d in dirs if not (0 <= c[0] - d[0] < ny and 0 <= c[1] - d[1] < nx)
+                                or not free[c[0] - d[0], c[1] - d[1]]]
+                        if not opts:
+                            continue
+                        d1 = opts[int(rng.integers(len(opts)))]
+                    else:
+                        d1 = dirs[int(rng.integers(4))]
+                    d2s = [d for d in dirs if d[0] * d1[0] + d[1] * d1[1] == 0]
+                    d2 = d2s[int(rng.integers(2))]
+                    S = np.zeros_like(free)
+                    ex = np.zeros_like(free)
+                    cells = [(c[0] + k * d1[0] + m * d2[0], c[1] + k * d1[1] + m * d2[1], k) for k in range(L1 + 1)
+                             for m in range(t)]
+                    cells += [(c[0] + (L1 - m) * d1[0] + k * d2[0], c[1] + (L1 - m) * d1[1] + k * d2[1], L1)
+                              for k in range(L2 + 1) for m in range(t)]
+                    if any(not (0 <= y < ny and 0 <= x < nx) for y, x, _ in cells):
+                        continue
+                    for y, x, k in cells:
+                        S[y, x] = True
+                        if attach and k < g:
+                            ex[y, x] = True
+                    if stamp(S, ex if attach else None, check_pieces=True):
+                        made += 1
+                        break
+            out['lwalls'] += made
+            info.update(lwalls=made)
+        if kind in ('pillars', 'mixed'):
+            skip = p.mixed_pillar_skip if kind == 'mixed' else p.pillar_skip
             ys, xs = np.nonzero(zm)
             px, py = rng.uniform(*p.pillar_spacing) / res, rng.uniform(*p.pillar_spacing) / res
             ox, oy = rng.uniform(0, px), rng.uniform(0, py)
@@ -847,7 +893,7 @@ def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
             placed = {}
             for i, gy in enumerate(np.arange(ys.min() + oy, ys.max() + 1, py)):
                 for j, gx in enumerate(np.arange(xs.min() + ox, xs.max() + 1, px)):
-                    if rng.random() < p.pillar_skip:
+                    if rng.random() < skip:
                         continue
                     cy, cx = int(round(gy + rng.uniform(-jit, jit))), int(round(gx + rng.uniform(-jit, jit)))
                     if not (0 <= cy < ny and 0 <= cx < nx and zm[cy, cx]):
@@ -857,8 +903,7 @@ def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
                     S[max(0, cy - s // 2):cy - s // 2 + s, max(0, cx - s // 2):cx - s // 2 + s] = True
                     if stamp(S):
                         placed[(i, j)] = (cy, cx)
-            if not placed:
-                continue
+        if placed:
             hall |= zm
             out['pillars'] += len(placed)
             th = max(1, int(round(p.strut_thick / res)))
@@ -899,48 +944,7 @@ def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
                     out['struts'].append(dict(mask=sm, frac=float(frac)))
             out['strut_links'] += links
             info.update(pillars=len(placed), strut_layers=n_layers, strut_links=links)
-        else:                                              # L walls
-            n_l = int(np.clip(round(area / p.lwall_area), 1, p.lwall_max))
-            wall_adj = zm & (dist <= 1.5)
-            inner = zm & (ndimage.distance_transform_edt(cur) >= g + 1)
-            made = 0
-            for _ in range(n_l):
-                for _try in range(60):
-                    attach = rng.random() < p.lwall_attach
-                    t = max(1, int(round(rng.uniform(*p.lwall_thick) / res)))
-                    L1, L2 = (int(round(rng.uniform(*p.lwall_leg) / res)) for _ in range(2))
-                    pool = np.argwhere(wall_adj & cur if attach else inner & cur)
-                    if not len(pool):
-                        continue
-                    c = pool[int(rng.integers(len(pool)))]
-                    if attach:                             # first leg points away from the wall it starts at
-                        opts = [d for d in dirs if not (0 <= c[0] - d[0] < ny and 0 <= c[1] - d[1] < nx)
-                                or not free[c[0] - d[0], c[1] - d[1]]]
-                        if not opts:
-                            continue
-                        d1 = opts[int(rng.integers(len(opts)))]
-                    else:
-                        d1 = dirs[int(rng.integers(4))]
-                    d2s = [d for d in dirs if d[0] * d1[0] + d[1] * d1[1] == 0]
-                    d2 = d2s[int(rng.integers(2))]
-                    S = np.zeros_like(free)
-                    ex = np.zeros_like(free)
-                    cells = [(c[0] + k * d1[0] + m * d2[0], c[1] + k * d1[1] + m * d2[1], k) for k in range(L1 + 1)
-                             for m in range(t)]
-                    cells += [(c[0] + (L1 - m) * d1[0] + k * d2[0], c[1] + (L1 - m) * d1[1] + k * d2[1], L1)
-                              for k in range(L2 + 1) for m in range(t)]
-                    if any(not (0 <= y < ny and 0 <= x < nx) for y, x, _ in cells):
-                        continue
-                    for y, x, k in cells:
-                        S[y, x] = True
-                        if attach and k < g:
-                            ex[y, x] = True
-                    if stamp(S, ex if attach else None, check_pieces=True):
-                        made += 1
-                        break
-            if not made:
-                continue
-            out['lwalls'] += made
-            info.update(lwalls=made)
+        if not made and not placed:
+            continue
         out['zones'].append(info)
     return out
