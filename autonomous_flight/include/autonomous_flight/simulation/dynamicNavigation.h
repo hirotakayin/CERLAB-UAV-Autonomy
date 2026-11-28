@@ -14,6 +14,7 @@
 #include <trajectory_planner/polyTrajOccMap.h>
 #include <trajectory_planner/piecewiseLinearTraj.h>
 #include <trajectory_planner/bsplineTraj.h>
+#include <std_msgs/Float32MultiArray.h>
 
 namespace AutoFlight{
 	class dynamicNavigation : public flightBase{
@@ -36,9 +37,12 @@ namespace AutoFlight{
 		ros::Publisher pwlTrajPub_;
 		ros::Publisher bsplineTrajPub_;
 		ros::Publisher inputTrajPub_;
+		ros::Subscriber flowObstacleSub_;
 
 		// parameters
 		bool useFakeDetector_;
+		std::string obstacleSource_; // dynamic obstacles from: "detector" (depth camera, dynamicMap), "fake" (ground truth), "flow" (360 camera flow, /opti360/obstacles)
+		double flowObstacleTimeout_; // s: flow obstacles older than this are dropped
 		bool useGlobalPlanner_;
 		bool noYawTurning_;
 		bool useYawControl_;
@@ -66,6 +70,8 @@ namespace AutoFlight{
 		bool firstTimeSave_ = false;
 		bool lastDynamicObstacle_ = false;
 		ros::Time lastDynamicObstacleTime_;
+		std::vector<onboardDetector::box3D> flowObstacles_; // latest /opti360/obstacles (centre, size, velocity)
+		ros::Time flowObstacleTime_;
 		
 
 
@@ -81,7 +87,9 @@ namespace AutoFlight{
 		void replanCheckCB(const ros::TimerEvent&);
 		void trajExeCB(const ros::TimerEvent&);
 		void visCB(const ros::TimerEvent&);
-		void freeMapCB(const ros::TimerEvent&); // using fake detector
+		void freeMapCB(const ros::TimerEvent&); // using fake detector or flow obstacles
+		void flowObstacleCB(const std_msgs::Float32MultiArrayConstPtr& msg);
+		void collectDynamicObstacles(std::vector<Eigen::Vector3d>& obstaclesPos, std::vector<Eigen::Vector3d>& obstaclesVel, std::vector<Eigen::Vector3d>& obstaclesSize);
 
 		void run();	
 		void getStartEndConditions(std::vector<Eigen::Vector3d>& startEndConditions);	

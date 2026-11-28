@@ -10,9 +10,12 @@ namespace AutoFlight{
 		this->initParam();
 		this->initModules();
 		this->registerPub();
-		if (this->useFakeDetector_){
-			// free map callback
+		if (this->obstacleSource_ != "detector"){
+			// free map callback: clear the map around the fake detector's or the flow obstacles
 			this->freeMapTimer_ = this->nh_.createTimer(ros::Duration(0.01), &dynamicNavigation::freeMapCB, this);
+		}
+		if (this->obstacleSource_ == "flow"){
+			this->flowObstacleSub_ = this->nh_.subscribe("/opti360/obstacles", 5, &dynamicNavigation::flowObstacleCB, this);
 		}
 		
 	}
@@ -26,6 +29,20 @@ namespace AutoFlight{
 		}
 		else{
 			cout << "[AutoFlight]: Use fake detector is set to: " << this->useFakeDetector_ << "." << endl;
+		}
+
+		// dynamic obstacle source: detector (depth camera) | fake (ground truth) | flow (360 camera optical flow + lidar)
+		if (not this->nh_.getParam("autonomous_flight/dynamic_obstacle_source", this->obstacleSource_)){
+			this->obstacleSource_ = this->useFakeDetector_ ? "fake" : "detector";
+		}
+		if (this->obstacleSource_ != "detector" and this->obstacleSource_ != "fake" and this->obstacleSource_ != "flow"){
+			cout << "[AutoFlight]: Unknown dynamic obstacle source " << this->obstacleSource_ << ". Use: detector." << endl;
+			this->obstacleSource_ = "detector";
+		}
+		this->useFakeDetector_ = (this->obstacleSource_ == "fake");
+		cout << "[AutoFlight]: Dynamic obstacle source is set to: " << this->obstacleSource_ << "." << endl;
+		if (not this->nh_.getParam("autonomous_flight/flow_obstacle_timeout", this->flowObstacleTimeout_)){
+			this->flowObstacleTimeout_ = 0.3;
 		}
 
 
@@ -110,6 +127,9 @@ namespace AutoFlight{
 			this->detector_.reset(new onboardDetector::fakeDetector (this->nh_));	
 			this->map_.reset(new mapManager::dynamicMap (this->nh_, false));
 		}
+		else if (this->obstacleSource_ == "flow"){
+			this->map_.reset(new mapManager::dynamicMap (this->nh_, false)); // the flow obstacles free the map (freeMapCB)
+		}
 		else{
 			this->map_.reset(new mapManager::dynamicMap (this->nh_));
 		}
@@ -160,12 +180,7 @@ namespace AutoFlight{
 
 		if (this->replan_){
 			std::vector<Eigen::Vector3d> obstaclesPos, obstaclesVel, obstaclesSize;
-			if (this->useFakeDetector_){
-				this->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
-			}
-			else{ 
-				this->map_->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
-			}
+			this->collectDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
 			// get start and end condition for trajectory generation (the end condition is the final zero condition)
 			std::vector<Eigen::Vector3d> startEndConditions;
 			this->getStartEndConditions(startEndConditions); 
@@ -530,6 +545,17 @@ namespace AutoFlight{
 	void dynamicNavigation::freeMapCB(const ros::TimerEvent&){
 		std::vector<onboardDetector::box3D> obstacles;
 		std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> freeRegions;
+		if (this->obstacleSource_ == "flow"){
+			if ((ros::Time::now() - this->flowObstacleTime_).toSec() > this->flowObstacleTimeout_) return;
+			for (onboardDetector::box3D ob : this->flowObstacles_){ // box centred on ob.z
+				Eigen::Vector3d lowerBound (ob.x-ob.x_width/2-0.3, ob.y-ob.y_width/2-0.3, ob.z-ob.z_width/2-0.3);
+				Eigen::Vector3d upperBound (ob.x+ob.x_width/2+0.3, ob.y+ob.y_width/2+0.3, ob.z+ob.z_width/2+0.3);
+				freeRegions.push_back(std::make_pair(lowerBound, upperBound));
+			}
+			this->map_->updateFreeRegions(freeRegions);
+			this->map_->freeRegions(freeRegions);
+			return;
+		}
 		this->detector_->getObstacles(obstacles);
 		double fov = 1.57;
 		for (onboardDetector::box3D ob: obstacles){
@@ -592,12 +618,7 @@ namespace AutoFlight{
 	bool dynamicNavigation::hasDynamicCollision(){
 		if (this->trajectoryReady_){
 			std::vector<Eigen::Vector3d> obstaclesPos, obstaclesVel, obstaclesSize;
-			if (this->useFakeDetector_){
-				this->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
-			}
-			else{ 
-				this->map_->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
-			}
+			this->collectDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
 
 			for (double t=this->trajTime_; t<=this->trajectory_.getDuration(); t+=0.1){
 				Eigen::Vector3d p = this->trajectory_.at(t);
@@ -641,12 +662,7 @@ namespace AutoFlight{
 	bool dynamicNavigation::replanForDynamicObstacle(){
 		ros::Time currTime = ros::Time::now();
 		std::vector<Eigen::Vector3d> obstaclesPos, obstaclesVel, obstaclesSize;
-		if (this->useFakeDetector_){
-			this->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
-		}
-		else{ 
-			this->map_->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
-		}
+		this->collectDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
 
 		bool replan = false;
 		bool hasDynamicObstacle = (obstaclesPos.size() != 0);
@@ -719,6 +735,37 @@ namespace AutoFlight{
 			currPath.poses.push_back(this->rrtPathMsg_.poses[i]);
 		}
 		return currPath;		
+	}
+
+	void dynamicNavigation::flowObstacleCB(const std_msgs::Float32MultiArrayConstPtr& msg){
+		// rows of 11: id, x, y, z (centre), vx, vy, size x, y, z, age, t (opti360 flow_obstacles.py)
+		const int row = 11;
+		this->flowObstacles_.clear();
+		for (size_t i=0; i+row<=msg->data.size(); i+=row){
+			onboardDetector::box3D ob;
+			ob.x = msg->data[i+1]; ob.y = msg->data[i+2]; ob.z = msg->data[i+3];
+			ob.Vx = msg->data[i+4]; ob.Vy = msg->data[i+5];
+			ob.x_width = msg->data[i+6]; ob.y_width = msg->data[i+7]; ob.z_width = msg->data[i+8];
+			this->flowObstacles_.push_back(ob);
+		}
+		this->flowObstacleTime_ = ros::Time::now();
+	}
+
+	void dynamicNavigation::collectDynamicObstacles(std::vector<Eigen::Vector3d>& obstaclesPos, std::vector<Eigen::Vector3d>& obstaclesVel, std::vector<Eigen::Vector3d>& obstaclesSize){
+		if (this->obstacleSource_ == "fake"){
+			this->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
+		}
+		else if (this->obstacleSource_ == "flow"){
+			if ((ros::Time::now() - this->flowObstacleTime_).toSec() > this->flowObstacleTimeout_) return;
+			for (onboardDetector::box3D ob : this->flowObstacles_){
+				obstaclesPos.push_back(Eigen::Vector3d (ob.x, ob.y, ob.z));
+				obstaclesVel.push_back(Eigen::Vector3d (ob.Vx, ob.Vy, 0.0));
+				obstaclesSize.push_back(Eigen::Vector3d (ob.x_width, ob.y_width, ob.z_width));
+			}
+		}
+		else{
+			this->map_->getDynamicObstacles(obstaclesPos, obstaclesVel, obstaclesSize);
+		}
 	}
 
 	void dynamicNavigation::getDynamicObstacles(std::vector<Eigen::Vector3d>& obstaclesPos, std::vector<Eigen::Vector3d>& obstaclesVel, std::vector<Eigen::Vector3d>& obstaclesSize){
