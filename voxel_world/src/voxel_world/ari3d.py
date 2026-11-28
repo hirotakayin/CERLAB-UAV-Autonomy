@@ -85,6 +85,32 @@ class Ari3DParams:
     min_island_m2: float = 4.0          # m2, smaller solid blobs (edge noise) stay full height
     robot_size: float = 1.0             # m, the drone's safety box
     start_clearance: float = 0.6        # m above the start region's floor
+    # clutter in big open spaces (off by default, so older worlds reproduce). An open zone is the union of the widest
+    # discs that fit (centres at least open_radius from walls); a zone of at least clutter_min_m2 gets, with
+    # clutter_chance, one of the `clutter` kinds:
+    #   'pillars'  a jittered grid of thin full-height pillars, joined by horizontal struts at one or two heights
+    #              (excavation1: 0.4 m pillars 4 m x 6 m apart, one strut layer); the hall's regions get clutter_clear of
+    #              height so the struts leave a passage above and below
+    #   'lwalls'   full-height L-shaped walls, free-standing or growing out of a wall, that split the hall into bays
+    # Every gap left is at least clutter_gap wide (2D check: the free space eroded by half of it keeps its pieces)
+    clutter: tuple = ()                 # kinds to draw from: () off, ('pillars',), ('lwalls',), ('pillars', 'lwalls')
+    open_radius: float = 4.0            # m, an open zone holds discs at least this big (8 m across)
+    clutter_min_m2: float = 250.0       # m2, least zone area that gets clutter
+    clutter_chance: float = 0.8         # share of big zones that get clutter (some halls stay open)
+    clutter_gap: float = 2.8            # m, least free width left between clutter and anything solid
+    clutter_clear: tuple = (8.0, 12.0)  # m, floor-to-ceiling height of a pillar hall's regions
+    pillar_size: tuple = (0.4, 1.2)     # m, square pillar side
+    pillar_spacing: tuple = (4.0, 7.0)  # m, grid pitch, drawn per axis
+    pillar_jitter: float = 0.4          # m, random shift of each pillar off the grid
+    pillar_skip: float = 0.1            # share of grid points left empty
+    strut_chance: float = 0.6           # share of pillar-pillar (and pillar-wall) links that get a strut, per layer
+    strut_layers: tuple = (1, 2)        # number of strut heights per hall
+    strut_thick: float = 0.4            # m, a strut's depth (z) and width
+    lwall_area: float = 120.0           # m2 of zone per L wall
+    lwall_max: int = 6                  # L walls per zone at most
+    lwall_leg: tuple = (4.0, 10.0)      # m, each leg's length
+    lwall_thick: tuple = (0.4, 0.8)     # m
+    lwall_attach: float = 0.5           # share of L walls that grow out of a wall (their first leg starts at it)
 
 
 def load_png(path):
@@ -152,6 +178,20 @@ class Ari3D:
         from skimage.segmentation import watershed
         regions = watershed(-dist, markers, mask=free).astype(np.int32)
         regions = _merge_small(regions, p.min_region_m2 / (res * res))
+        # 1b. clutter in big open spaces: pillars (+ struts) and L walls become solid in the 2D map; the regions stay
+        #     those of the open map (a pillar grid must not shatter a hall into many small terraces)
+        self.clutter = dict(mask=np.zeros_like(free), struts=[], zones=[], pillars=0, lwalls=0, halls=[])
+        if p.clutter:
+            self.clutter = _plan_clutter(free, dist, start_rc, p, np.random.default_rng([seed, int(rng.integers(1 << 30)), 7]),
+                                         ndimage)
+            cm = self.clutter['mask']
+            hall = self.clutter['hall_mask']
+            self.clutter['halls'] = [int(i) for i in np.unique(regions[hall]) if i > 0
+                                     and (hall & (regions == i)).sum() >= 0.5 * (regions == i).sum()]
+            free = free & ~cm
+            regions = np.where(cm, 0, regions)
+            dist = ndimage.distance_transform_edt(free)
+            self.free2d = free
         ids = [int(i) for i in np.unique(regions) if i > 0]
         self.regions = regions
 
@@ -165,6 +205,9 @@ class Ari3D:
         gap = math.ceil(p.passage / res - 1e-9) * res        # the passage in whole voxels
         self.gap = gap
         clear = {i: snap(rng.uniform(*p.clear)) for i in ids}
+        for i in self.clutter['halls']:                  # pillar halls are tall: struts with a passage above and below
+            if i in clear:
+                clear[i] = snap(rng.uniform(*p.clutter_clear))
         level = {}
         first = int(regions[start_rc]) if regions[start_rc] > 0 else ids[0]
         level[first], queue = 0.0, [first]
@@ -239,7 +282,9 @@ class Ari3D:
             if not around:
                 continue
             u = rng.random()
-            if u < p.low_island[0]:
+            if self.clutter['mask'][mask].any():
+                islands[j] = dict(kind='full', around=around)    # clutter stays full height
+            elif u < p.low_island[0]:
                 islands[j] = dict(kind='low', around=around, frac=rng.uniform(0.2, 0.8))
             elif u < p.low_island[0] + (1 - p.low_island[0]) * p.overhang[0]:
                 islands[j] = dict(kind='lip', around=around, reach=rng.uniform(*p.overhang[1:]), frac=rng.uniform(0.2, 0.8))
@@ -376,7 +421,8 @@ class Ari3D:
                          lintels=sum(g['kind'] == 'lintel' for g in gates),
                          flat_reach=round(float(self.flat_reach), 3), flat_height_m=round(float(self.flat_height), 1),
                          passage_m=round(self.gap, 2), margin_reach=round(self.margin_reach, 3),
-                         flattened=len(self.flattened),
+                         flattened=len(self.flattened), clutter_zones=len(self.clutter['zones']),
+                         pillars=self.clutter['pillars'], struts=len(self.clutter['struts']), lwalls=self.clutter['lwalls'],
                          explorable_m3=round(float(self.explorable.sum() * res ** 3), 1),
                          reachable_share=round(float(reach.sum() / cfree.sum()), 4))
 
@@ -429,6 +475,18 @@ class Ari3D:
         f = np.where(np.isnan(fmap), np.inf, fmap)
         c = np.where(np.isnan(cmap), -np.inf, cmap)
         free3 = (zc[:, None, None] > f[None]) & (zc[:, None, None] < c[None])
+        th = max(1, int(round(p.strut_thick / res)))
+        for st in self.clutter['struts']:                 # struts: a beam over free columns, passage above and below
+            ys, xs = np.nonzero(st['mask'] & ~np.isnan(fmap) & ~np.isnan(cmap))
+            if not len(ys):
+                continue
+            fl, cl = fmap[ys, xs], cmap[ys, xs]
+            lo, hi = fl + self.gap, cl - self.gap - th * res           # beam bottom range keeping both passages
+            z = np.where(hi >= lo, lo + st['frac'] * (hi - lo), fl + self.gap)   # too low a room: passage below only
+            k0 = np.ceil(z / res - 1e-6).astype(int)
+            ok = (k0 + th) * res <= cl - 1e-6
+            for dz in range(th):
+                free3[np.clip(k0[ok] + dz, 0, nz - 1), ys[ok], xs[ok]] = False
         for d in decks:                                   # bridge: an enclosed passage over the block, raised ends
             rp, rq = int(regions[d['P']]), int(regions[d['Q']])
             z0 = max(floor[rp], floor[rq]) + base + d['rise']
@@ -496,6 +554,9 @@ class Ari3D:
             ax.plot(self.start[0], self.start[1], marker='*', ms=15, color='#e0218a', mec='white', mew=0.8)
             ax.set_title(title, fontsize=10)
             ax.tick_params(labelsize=8)
+        for st in self.clutter['struts']:                 # struts over the regions panel (yellow)
+            ys, xs = np.nonzero(st['mask'])
+            axs[0].scatter((xs + 0.5) * res, (ys + 0.5) * res, s=1.5, marker='s', linewidths=0, color='#ffd21f')
         # a side cut: through the first shaft (along its longer side), else through the start
         ax = axs[3]
         shafts = [r for r, k in self.kind.items() if k == 'shaft']
@@ -564,10 +625,10 @@ class Ari3D:
         i = self.info
         fig.suptitle('%s (seed %d): %.0f x %.0f m, %.1f m tall; %d regions on %d levels (span %.1f m); %d staggers (shafts, '
                      'magenta); %d bridges (white); %d pits; %d islands (%d low, %d lips); %d hurdles (orange), '
-                     '%d lintels (cyan); best single height reaches %.0f%%'
+                     '%d lintels (cyan); best single height reaches %.0f%%\nclutter: %d zones, %d pillars, %d strut layers (yellow), %d L walls'
                      % (i['png'], self.seed, *i['size_m'], i['regions'], i['levels'], i['level_span_m'], i['staggers'],
                         i['bridges'], i['sunken'], i['islands'], i['low_islands'], i['lips'], i['hurdles'],
-                        i['lintels'], 100 * i['flat_reach']),
+                        i['lintels'], 100 * i['flat_reach'], i['clutter_zones'], i['pillars'], i['struts'], i['lwalls']),
                      fontsize=10.5)
         fig.tight_layout(rect=(0, 0, 1, 0.93))
         fig.savefig(path, dpi=80)
@@ -722,4 +783,164 @@ def _dilate6(mask):
     out[:, :-1] |= mask[:, 1:]
     out[:, :, 1:] |= mask[:, :, :-1]
     out[:, :, :-1] |= mask[:, :, 1:]
+    return out
+
+
+def _disk(r):
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    return yy * yy + xx * xx <= r * r
+
+
+def _plan_clutter(free, dist, start_rc, p, rng, ndimage):
+    """Pillars (+ struts) and L walls in the big open zones of `free` (see Ari3DParams.clutter). Returns dict(mask: the
+    new solid cells, hall_mask: the pillar zones, struts: [dict(mask, frac)] one per strut layer, zones: [dict(kind,
+    area_m2, ...)], pillars, lwalls, strut_links)."""
+    res = p.resolution
+    ny, nx = free.shape
+    r_open = p.open_radius / res
+    core = free & (dist >= r_open)
+    zone = free & (ndimage.distance_transform_edt(~core) <= r_open) if core.any() else np.zeros_like(free)
+    lab, n = ndimage.label(zone)
+    g = int(round(p.clutter_gap / res))                   # free cells to keep between clutter and other solid
+    er = _disk(max(1, g // 2))
+    cur = free.copy()
+    mask = np.zeros_like(free)
+    hall = np.zeros_like(free)
+    sy0, sx0 = start_rc
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    near_start = (yy - sy0) ** 2 + (xx - sx0) ** 2 <= (3.0 / res) ** 2
+    pieces = lambda fr: ndimage.label(ndimage.binary_erosion(fr, er))[1]
+    n_pieces = [pieces(cur)]
+    out = dict(mask=mask, hall_mask=hall, struts=[], zones=[], pillars=0, lwalls=0, strut_links=0)
+
+    def stamp(S, exempt=None, check_pieces=False):
+        if not S.any() or (S & ~cur).any() or (S & near_start).any():
+            return False
+        ys, xs = np.nonzero(S)
+        y0, y1, x0, x1 = max(0, ys.min() - g), min(ny, ys.max() + g + 1), max(0, xs.min() - g), min(nx, xs.max() + g + 1)
+        core_s = S[y0:y1, x0:x1] & ~(exempt[y0:y1, x0:x1] if exempt is not None else False)
+        grown = ndimage.binary_dilation(core_s, _disk(g))
+        if (grown & ~cur[y0:y1, x0:x1] & ~S[y0:y1, x0:x1]).any():
+            return False                                   # closer than clutter_gap to something solid
+        if check_pieces:
+            k = pieces(cur & ~S)
+            if k != n_pieces[0]:
+                return False                               # cut off a pocket (or closed a gap) for the grown drone
+        cur[S] = False
+        mask[S] = True
+        return True
+
+    dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    order = sorted(range(1, n + 1), key=lambda z: -(lab == z).sum())
+    for z in order:
+        zm = lab == z
+        area = float(zm.sum()) * res * res
+        if area < p.clutter_min_m2 or rng.random() > p.clutter_chance:
+            continue
+        kind = p.clutter[int(rng.integers(len(p.clutter)))]
+        info = dict(kind=kind, area_m2=round(area, 1))
+        if kind == 'pillars':
+            ys, xs = np.nonzero(zm)
+            px, py = rng.uniform(*p.pillar_spacing) / res, rng.uniform(*p.pillar_spacing) / res
+            ox, oy = rng.uniform(0, px), rng.uniform(0, py)
+            jit = p.pillar_jitter / res
+            placed = {}
+            for i, gy in enumerate(np.arange(ys.min() + oy, ys.max() + 1, py)):
+                for j, gx in enumerate(np.arange(xs.min() + ox, xs.max() + 1, px)):
+                    if rng.random() < p.pillar_skip:
+                        continue
+                    cy, cx = int(round(gy + rng.uniform(-jit, jit))), int(round(gx + rng.uniform(-jit, jit)))
+                    if not (0 <= cy < ny and 0 <= cx < nx and zm[cy, cx]):
+                        continue
+                    s = max(1, int(round(rng.uniform(*p.pillar_size) / res)))
+                    S = np.zeros_like(free)
+                    S[max(0, cy - s // 2):cy - s // 2 + s, max(0, cx - s // 2):cx - s // 2 + s] = True
+                    if stamp(S):
+                        placed[(i, j)] = (cy, cx)
+            if not placed:
+                continue
+            hall |= zm
+            out['pillars'] += len(placed)
+            th = max(1, int(round(p.strut_thick / res)))
+            n_layers = int(rng.integers(p.strut_layers[0], p.strut_layers[1] + 1))
+            fracs = [(k + rng.uniform(0.2, 0.8)) / n_layers for k in range(n_layers)]
+            links = 0
+            for frac in fracs:
+                sm = np.zeros_like(free)
+
+                def beam(a, b):
+                    m = int(max(abs(b[0] - a[0]), abs(b[1] - a[1]))) + 1
+                    for t in np.linspace(0, 1, m):
+                        y, x = int(round(a[0] + t * (b[0] - a[0]))), int(round(a[1] + t * (b[1] - a[1])))
+                        sm[max(0, y - th // 2):y - th // 2 + th, max(0, x - th // 2):x - th // 2 + th] = True
+
+                for (i, j), a in placed.items():
+                    for di, dj in ((1, 0), (0, 1), (-1, 0), (0, -1)):
+                        b = placed.get((i + di, j + dj))
+                        if b is not None:
+                            if (di, dj) in ((1, 0), (0, 1)) and rng.random() < p.strut_chance:
+                                beam(a, b)
+                                links += 1
+                            continue
+                        # no pillar that way: a strut to the wall, if one is within 1.5 pitches
+                        step = (di, dj)
+                        reach = int(1.5 * (py if di else px))
+                        for k in range(1, reach + 1):
+                            y, x = a[0] + k * step[0], a[1] + k * step[1]
+                            if not (0 <= y < ny and 0 <= x < nx):
+                                break
+                            if not free[y, x] and not mask[y, x]:  # a wall of the map (not clutter)
+                                if rng.random() < p.strut_chance:
+                                    beam(a, (y - step[0], x - step[1]))
+                                    links += 1
+                                break
+                sm &= cur
+                if sm.any():
+                    out['struts'].append(dict(mask=sm, frac=float(frac)))
+            out['strut_links'] += links
+            info.update(pillars=len(placed), strut_layers=n_layers, strut_links=links)
+        else:                                              # L walls
+            n_l = int(np.clip(round(area / p.lwall_area), 1, p.lwall_max))
+            wall_adj = zm & (dist <= 1.5)
+            inner = zm & (ndimage.distance_transform_edt(cur) >= g + 1)
+            made = 0
+            for _ in range(n_l):
+                for _try in range(60):
+                    attach = rng.random() < p.lwall_attach
+                    t = max(1, int(round(rng.uniform(*p.lwall_thick) / res)))
+                    L1, L2 = (int(round(rng.uniform(*p.lwall_leg) / res)) for _ in range(2))
+                    pool = np.argwhere(wall_adj & cur if attach else inner & cur)
+                    if not len(pool):
+                        continue
+                    c = pool[int(rng.integers(len(pool)))]
+                    if attach:                             # first leg points away from the wall it starts at
+                        opts = [d for d in dirs if not (0 <= c[0] - d[0] < ny and 0 <= c[1] - d[1] < nx)
+                                or not free[c[0] - d[0], c[1] - d[1]]]
+                        if not opts:
+                            continue
+                        d1 = opts[int(rng.integers(len(opts)))]
+                    else:
+                        d1 = dirs[int(rng.integers(4))]
+                    d2s = [d for d in dirs if d[0] * d1[0] + d[1] * d1[1] == 0]
+                    d2 = d2s[int(rng.integers(2))]
+                    S = np.zeros_like(free)
+                    ex = np.zeros_like(free)
+                    cells = [(c[0] + k * d1[0] + m * d2[0], c[1] + k * d1[1] + m * d2[1], k) for k in range(L1 + 1)
+                             for m in range(t)]
+                    cells += [(c[0] + (L1 - m) * d1[0] + k * d2[0], c[1] + (L1 - m) * d1[1] + k * d2[1], L1)
+                              for k in range(L2 + 1) for m in range(t)]
+                    if any(not (0 <= y < ny and 0 <= x < nx) for y, x, _ in cells):
+                        continue
+                    for y, x, k in cells:
+                        S[y, x] = True
+                        if attach and k < g:
+                            ex[y, x] = True
+                    if stamp(S, ex if attach else None, check_pieces=True):
+                        made += 1
+                        break
+            if not made:
+                continue
+            out['lwalls'] += made
+            info.update(lwalls=made)
+        out['zones'].append(info)
     return out
